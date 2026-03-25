@@ -82,7 +82,7 @@ class ClientSocket():
             else:
                 recv_len = MSG_PREFIX_SIZE - len(state.header_buff)
 
-        received = self.socket.recv(MSG_PREFIX_SIZE)
+        received = self.socket.recv(recv_len)
         if(received == b""):
             self.recv_queue.pop(0)
             return False # disconnected

@@ -2,6 +2,7 @@ import sys
 
 import networkservice
 
+attacker = None
 service = None
 def main(mode, host, port):
     if(mode == "client"):
@@ -9,7 +10,8 @@ def main(mode, host, port):
     elif(mode == "server"):
         service = networkservice.Server(host, port)
     elif(mode == "attack"):
-        pass
+        attacker = networkservice.Attacker(host, port)
+        service = attacker.get_service()
     else:
         exit()
 

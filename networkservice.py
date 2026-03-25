@@ -20,10 +20,13 @@ class NetworkService():
         pass
 
 class Client(NetworkService):
-    def __init__(self, host : str, port : int):
+    def __init__(self, host : str, port : int, attack_send_handler = None, attack_recv_handler = None):
         super().__init__(host, port)
         self.socket.connect((self.host, self.port))
         self.client_socket = networkstack.ClientSocket(self.socket)
+
+        self.attack_send_handler = attack_send_handler
+        self.attack_recv_handler = attack_recv_handler
         
         self.lock = threading.Lock()
         self.network_thread = threading.Thread(target = self.network_loop)
@@ -39,12 +42,12 @@ class Client(NetworkService):
                 return
             else:
                 if(self.network_thread.is_alive()):
-                    self.client_socket.send(input_.encode("utf-8"))  
+                    self.send(input_.encode("utf-8"))  
     
     def network_loop(self):
         while self.client_socket.socket is not None:
             self.lock.acquire()
-            connected = self.client_socket.process(self.receive_handler)
+            connected = self.client_socket.process(self.recv)
             self.lock.release()
             if(not connected):
                 self.client_socket.shutdown()
@@ -52,6 +55,18 @@ class Client(NetworkService):
                 return
 
             time.sleep(0.1)
+
+    def send(self, data):
+        if(self.attack_send_handler is None):
+            self.client_socket.send(data)
+        else:
+            self.attack_send_handler(self.client_socket, data)
+
+    def recv(self, sender_socket, data : bytes):
+        if(self.attack_recv_handler is None):
+            self.receive_handler(sender_socket, data)
+        else:
+            self.attack_recv_handler(self.client_socket, self.receive_handler, data)
 
     def receive_handler(self, sender_socket, data : bytes):
         message = data.decode("utf-8")
@@ -83,3 +98,19 @@ class Server(NetworkService):
 
     def shutdown(self):
         self.server_socket.shutdown()
+
+class Attacker():
+    def send_handler(self, client_socket, data):
+        print("sent", data)
+        client_socket.send(b"i totally sent this lol")
+
+    def recv_handler(self, client_socket, client_receive_handler, data):
+        print("received", data)
+        client_socket.send(b"this is a totally authentic reply")
+        client_receive_handler(client_socket, b"you totally received this")
+    
+    def __init__(self, host : str, port : int):
+        self.client = Client(host, port, self.send_handler, self.recv_handler)
+
+    def get_service(self):
+        return self.client
