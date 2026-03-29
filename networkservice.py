@@ -1,3 +1,4 @@
+from diffieHellman import DHNetwork
 import socket
 import threading
 import time
@@ -27,6 +28,12 @@ class Client(NetworkService):
 
         self.attack_send_handler = attack_send_handler
         self.attack_recv_handler = attack_recv_handler
+
+        # --- DH parameters ---
+        self.p = None
+        self.g = None
+        self.private_key = None
+        self.shared_secret = None
         
         self.lock = threading.Lock()
         self.network_thread = threading.Thread(target = self.network_loop)
@@ -40,6 +47,13 @@ class Client(NetworkService):
                 self.client_socket.shutdown()
                 self.lock.release()
                 return
+            elif input_ == "dh":
+
+                packet, self.p, self.g, self.private_key = DHNetwork.build_init_packet()
+
+                if self.network_thread.is_alive():
+                    self.send(packet.encode("utf-8"))
+
             else:
                 if(self.network_thread.is_alive()):
                     self.send(input_.encode("utf-8"))  
@@ -70,6 +84,12 @@ class Client(NetworkService):
 
     def receive_handler(self, sender_socket, data : bytes):
         message = data.decode("utf-8")
+
+        if message.startswith("DH_ACCEPT:"):
+            self.shared_secret = DHNetwork.process_accept_packet(message, self.p, self.private_key)
+            print(f"shared secret: {str(self.shared_secret)[:15]}...")
+            return
+
         print(message)
 
     def shutdown(self):
@@ -82,6 +102,10 @@ class Server(NetworkService):
         self.socket.listen(1)
         
         self.server_socket = networkstack.ServerSocket(self.socket)
+
+        #DH handling: port -> shared secret
+        self.client_secrets = {}
+
         print("server started")
 
     def loop(self):
@@ -90,6 +114,16 @@ class Server(NetworkService):
         
     def receive_handler(self, sender, data : bytes):
         message = data.decode("utf-8")
+
+        if message.startswith("DH_INIT:"):
+
+            packet, shared_secret = DHNetwork.process_init_packet(message)
+            self.client_secrets[sender.port] = shared_secret
+            sender.send(packet.encode("utf-8"))
+            print(f"shared secret: {str(shared_secret)[:15]}...")
+
+            return
+
         resend = "{}: {}".format(sender.port, message)
 
         for client_port in self.server_socket.clients:
