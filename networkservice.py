@@ -16,6 +16,14 @@ class NetworkService():
     @abstractmethod
     def loop(self):
         pass
+
+    # helper function for decrypting and decoding received data
+    def decrypt_and_decode(self, encrypted_data, secret):
+        # tady přijde AES-GCM dešifrování
+        decrypted_data = encrypted_data
+        decoded_message = decrypted_data.decode("utf-8")
+
+        return decoded_message
     
     @abstractmethod
     def shutdown(self):
@@ -73,7 +81,13 @@ class Client(NetworkService):
 
             else:
                 if(self.network_thread.is_alive()):
-                    self.send(input_.encode("utf-8"))  
+                    encoded_message = input_.encode("utf-8")
+                    
+                    if(self.shared_secret is not None):
+                        self.send_encrypted_to_server(encoded_message, self.shared_secret)
+                    else:
+                        print("sending unencrypted message")
+                        self.send(encoded_message)  
     
     def network_loop(self):
         while self.client_socket.socket is not None:
@@ -92,6 +106,11 @@ class Client(NetworkService):
             self.client_socket.send(data)
         else:
             self.attack_send_handler(self.client_socket, data)
+
+    def send_encrypted_to_server(self, data, shared_secret):
+        # Tady přijde AES-GCM šifrování
+        encrypted_data = data # AES_GCM(data, shared_secret)
+        self.send(encrypted_data)
 
     def recv(self, sender_socket, data : bytes):
         if(self.attack_recv_handler is None):
@@ -120,7 +139,13 @@ class Client(NetworkService):
             print(f"shared secret: {str(self.shared_secret)[:15]}...")
             return
 
-        print(message)
+        # received encrypted message
+        if(self.shared_secret is not None):
+            decrypted_message = self.decrypt_and_decode(data, self.shared_secret)
+            print(decrypted_message)
+        else:
+            print("Received unencrypted message!")
+            print(message)
 
     def shutdown(self):
         self.client_socket.shutdown()
@@ -181,11 +206,27 @@ class Server(NetworkService):
 
                 print(f"shared secret: {str(shared_secret)[:15]}...")
                 return
+        
+        # 3. encrypted client messages
+        if(sender.port not in self.client_secrets):
+            sender.send("Type 'rsa' and then 'dh' to start communicating securely".encode("utf-8"))
+            return
 
         resend = "{}: {}".format(sender.port, message)
         for client_port in self.server_socket.clients:
-            if (client_port != sender.port):
-                self.server_socket.clients[client_port].send(resend.encode("utf-8"))
+            if (client_port != sender.port and client_port in self.client_secrets):
+                client_socket = self.server_socket.clients[client_port]
+                encoded_message = resend.encode("utf-8")
+                client_secret = self.client_secrets[client_port]
+                
+                self.send_encrypted_to_client(client_socket, encoded_message, client_secret)
+    
+    # helper function for encrypting data and sending it to a client
+    def send_encrypted_to_client(self, client_socket, data, secret, handler = None, handler_args = ()):
+        # tady přijde AES-GCM šifrování
+        encrypted_data = data
+        client_socket.send(encrypted_data, handler, handler_args)
+    
     def shutdown(self):
         self.server_socket.shutdown()
 
