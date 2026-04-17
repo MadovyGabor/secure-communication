@@ -9,6 +9,12 @@ import sys, math, numpy
 
 data = b'\x01\x02\x03\x04\x05'
 
+key = b'\x00' * 16
+
+icb = b'\x00' * 12 + b'\x00\x00\x00\x01'  # 96-bit nonce + counter=1
+
+plaintext = b'Hello AES GCM mode test!!!'
+
 # Operácie XOR
 def xor_bytes(a: bytes, b: bytes) -> bytes:
     result = []
@@ -42,7 +48,26 @@ def split_blocks(data: bytes, block_size=16) -> List[bytes]:
     return result
 
 
-def gtcr(key, icb, data): # data = plaintext/ ciphertext
+def gctr(key, icb, data) -> bytes:  # data = plaintext / ciphertext
+    if len(data) == 0:
+        return b""
+
+    blocks = split_blocks(data, 16)
+    counter = icb
+    result = b""
+
+    cipher = Cipher(algorithms.AES(key), modes.ECB())
+    encryptor = cipher.encryptor()
+
+    for block in blocks:
+        encrypted_counter = encryptor.update(counter)
+        xored = xor_bytes(block, encrypted_counter[:len(block)])
+        result += xored
+        counter = inc32(counter)
+
+    return result
+
+def ghash(hash_subkey , aad: bytes, cipher):
     pass
 
 
@@ -52,4 +77,8 @@ def GCM(nonce, key: bytes, plaintext: str) -> str:
 
     pass
 
-print(split_blocks(data))
+ciphertext = gctr(key, icb, plaintext)
+decrypted = gctr(key, icb, ciphertext)
+
+print(ciphertext)
+print(decrypted)
