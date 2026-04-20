@@ -1,64 +1,78 @@
-from cryptography.hazmat.primitives.asymmetric import dh
 import secrets
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-def generate_dh_parameters() -> tuple[int, int]:
+# RFC 3526 MODP Group 14 (2048-bit)
+# These are cryptographically vetted "Safe Primes" used as an industry standard.
+DH_P = int(
+    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
+    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
+    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
+    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
+    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D"
+    "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F"
+    "83655D23DCA3AD961C62F356208552BB9ED529077096966D"
+    "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
+    "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9"
+    "DE2BCBF6955817183995497CEA956AE515D2261898FA0510"
+    "15728E5A8AACAA68FFFFFFFFFFFFFFFF", 16
+)
+DH_G = 2
+
+def get_dh_parameters() -> tuple[int, int]:
     """
-    Generates the parameters for the Diffie-Hellman key exchange (RFC 3526).
-
-    Returns:
-        tuple[int, int]: A tuple containing (p, g) where:
-            - p is a large prime number (modulus).
-            - g is the generator (primitive root modulo p).
+    Returns the fixed RFC 3526 DH parameters (P, G).
     """
-    parameters = dh.generate_parameters(generator=2, key_size=2048)
-    p = parameters.parameter_numbers().p
-    g = parameters.parameter_numbers().g
-    return p, g
-
+    return DH_P, DH_G
 
 def generate_private_key(p: int) -> int:
     """
-    Generates a cryptographically secure random private key.
-
-    Args:
-        p (int): The modulus (large prime number).
-
-    Returns:
-        int: The secret private key (a or b), strictly less than p.
+    Generates a cryptographically secure random private key in the safe range [2, p-2].
     """
-    private_key = secrets.randbelow(p)
-    return private_key
+    while True:
+        private_key = secrets.randbelow(p - 1)
+        if private_key >= 2:
+            return private_key
 
+def is_valid_public_key(public_key: int, p: int) -> bool:
+    """
+    Validates the received public key to prevent Small Subgroup Attacks.
+    """
+    return 1 < public_key < p - 1
 
 def generate_public_key(private_key: int, g: int, p: int) -> int:
     """
     Calculates the public key to be shared over the network.
     Formula: A = g^a mod p
-
-    Args:
-        private_key (int): The user's secret private key.
-        g (int): The generator.
-        p (int): The modulus.
-
-    Returns:
-        int: The public key (A or B) to send to the peer.
     """
-    public_key = pow(g, private_key, p)
-    return public_key
-
+    return pow(g, private_key, p)
 
 def generate_shared_secret(private_key: int, peer_public_key: int, p: int) -> int:
     """
-    Calculates the final shared secret using the peer's public key.
-    Formula: K = B^a mod p (or K = A^b mod p)
-
-    Args:
-        private_key (int): The user's own secret private key.
-        peer_public_key (int): The public key received from the network.
-        p (int): The modulus.
-
-    Returns:
-        int: The final shared secret (K) which will be identical on both sides.
+    Calculates the raw shared secret using the peer's public key.
+    Formula: K = B^a mod p
     """
-    shared_secret = pow(peer_public_key, private_key, p)
-    return shared_secret
+    return pow(peer_public_key, private_key, p)
+
+def derive_aes_key(shared_secret: int) -> bytes:
+    """
+    Derives a 32-byte (256-bit) AES key from the raw DH shared secret using HKDF.
+    
+    Args:
+        shared_secret (int): The raw integer resulting from DH math.
+        
+    Returns:
+        bytes: The derived 32-byte symmetric key.
+    """
+    # Convert integer to bytes (256 bytes for a 2048-bit number)
+    shared_secret_bytes = shared_secret.to_bytes((shared_secret.bit_length() + 7) // 8, byteorder='big')
+    
+    # Use HKDF to derive a strong symmetric key
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'dh key exchange'
+    )
+    key = hkdf.derive(shared_secret_bytes)
+    return key
