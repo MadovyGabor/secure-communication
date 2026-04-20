@@ -7,12 +7,16 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from gcm_utils import xor_bytes, inc32, split_blocks_no_padding
 from gf import GHASH
 
-# Testovacie premenné
+"""
+--- Testovacie premenné ---
+
 key = b'\x00' * 16
-nonce = b'\x00' * 12
+noonce = b'\x00' * 12
 plaintext = b'Hello AES GCM mode test!!!'
 
-# Gallois 
+"""
+
+# Gallois Counter Mode
 def GCTR(key: bytes, icb: bytes, data: bytes) -> bytes:
     if len(data) == 0:
         return b""
@@ -59,5 +63,9 @@ def AES_GCM(nonce, key: bytes, plaintext: bytes) -> tuple[bytes, bytes]:
 
     return ciphertext, tag
 
+
+"""
 C, T = AES_GCM(nonce, key, plaintext)
 print(f"Šifra: {C}\nTag: {T}")
+
+"""
