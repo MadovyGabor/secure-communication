@@ -9,16 +9,14 @@ Oliver Synak
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from gcm_utils import xor_bytes, inc32
 from gf import GHASH
-from django.db import IntegrityError
-
-
+import hmac
 
 
 """
 --- Testovacie premenné ---
 
 key = b'\x00' * 16
-noonce = b'\x00' * 12
+nonce = b'\x00' * 12
 plaintext = b'Hello AES GCM mode test!!!'
 
 """
@@ -40,67 +38,56 @@ def gctr(key: bytes, icb: bytes, data: bytes) -> bytes:
         block = data[i:i+16]
 
         encryptor = cipher.encryptor()
-        encrypted_counter = encryptor.update(counter)
+        keystream = encryptor.update(counter) + encryptor.finalize()
 
-        xored = xor_bytes(block, encrypted_counter[:len(block)])
-        blocks_out.append(xored)
-
+        blocks_out.append(xor_bytes(block, keystream[:len(block)]))
         counter = inc32(counter)
 
     return b"".join(blocks_out)
 
 
-def aes_gcm_encrypt(nonce: bytes, key: bytes, plaintext: bytes) -> tuple[bytes, bytes, bytes]:
+def aes_gcm_encrypt(nonce: bytes, key: bytes, plaintext: bytes) -> tuple[bytes, bytes]:
     if len(nonce) != 12:
         raise ValueError("Nonce must be 96 bits")
 
-    # H = AES(key, 0^128) 
     cipher = Cipher(algorithms.AES(key), modes.ECB())
     encryptor = cipher.encryptor()
-    H = encryptor.update(b'\x00' * 16)
+    H = encryptor.update(b'\x00' * 16) + encryptor.finalize()
 
-    # Counters
     Y0 = nonce + b'\x00\x00\x00\x01'
     Y1 = inc32(Y0)
 
-    # Encrypt - creating ciphertext
     ciphertext = gctr(key, Y1, plaintext)
 
-    # GHASH - math
-    ghash_result = GHASH(H, b"", ciphertext)
+    S = GHASH(H, b"", ciphertext)
 
-    # Tag - integrity check
-    tag = gctr(key, Y0, ghash_result)
+    tag = gctr(key, Y0, S)
 
-    return nonce, ciphertext, tag
+    return ciphertext, tag
 
 
 def aes_gcm_decrypt(nonce: bytes, key: bytes, ciphertext: bytes, tag: bytes) -> bytes:
     if len(nonce) != 12:
         raise ValueError("Nonce must be 96 bits")
-    
-    # H = AES(key, 0^128) 
+
     cipher = Cipher(algorithms.AES(key), modes.ECB())
     encryptor = cipher.encryptor()
-    H = encryptor.update(b'\x00' * 16)
-    encryptor.finalize()
+    H = encryptor.update(b'\x00' * 16) + encryptor.finalize()
 
-    # Counters
     Y0 = nonce + b'\x00\x00\x00\x01'
     Y1 = inc32(Y0)
 
-    # recomputing authentication
-    S = GHASH(H, b"", ciphertext) 
+    S = GHASH(H, b"", ciphertext)
     T_calc = gctr(key, Y0, S)
 
-    # Verification
-    if T_calc != tag:
+    if not hmac.compare_digest(T_calc, tag):
         raise ValueError("Authentication failed")
-    
-    # Decryption
+
     plaintext = gctr(key, Y1, ciphertext)
 
     return plaintext
+
+
 
 """
 

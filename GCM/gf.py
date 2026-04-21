@@ -21,10 +21,14 @@ def gf_multiply(x: bytes, h: bytes) -> bytes:
     return result.to_bytes(16, 'big')
 
 
-def GHASH(hash_subkey: bytes ,aad: bytes, cipher: bytes):
+def GHASH(hash_subkey: bytes, aad: bytes, cipher: bytes) -> bytes:
     result = b'\x00' * 16
-    A,C = split_blocks(aad, 16), split_blocks(cipher, 16)
-    len_A, len_C = len(aad) * 8, len(cipher) * 8
+
+    A = split_blocks(aad, 16)
+    C = split_blocks(cipher, 16)
+
+    len_A = len(aad) * 8
+    len_C = len(cipher) * 8
 
     for block in A:
         result = xor_bytes(result, block)

@@ -1,8 +1,7 @@
 from diffieHellman import DHNetwork
 from RSA import RSA_Main
-import socket
-import threading
-import time
+from GCM import aes_gcm_encrypt, aes_gcm_decrypt
+import socket, threading, time
 from abc import abstractmethod
 
 import networkstack
@@ -224,6 +223,7 @@ class Server(NetworkService):
     # helper function for encrypting data and sending it to a client
     def send_encrypted_to_client(self, client_socket, data, secret, handler = None, handler_args = ()):
         # tady přijde AES-GCM šifrování
+        aes_gcm_encrypt()
         encrypted_data = data
         client_socket.send(encrypted_data, handler, handler_args)
     
