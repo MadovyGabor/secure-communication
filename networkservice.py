@@ -244,4 +244,4 @@ class Attacker():
         self.client = Client(host, port, self.send_handler, self.recv_handler)
 
     def get_service(self):
-        return self.client
+        return self.clientw
