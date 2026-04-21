@@ -1,5 +1,6 @@
 from diffieHellman import DHNetwork
 from RSA import RSA_Main
+from RSA import RSA_Math as RSA_Logic
 import socket
 import threading
 import time
@@ -30,8 +31,9 @@ class NetworkService():
         pass
 
 class Client(NetworkService):
-    def __init__(self, host : str, port : int, attack_send_handler = None, attack_recv_handler = None):
+    def __init__(self, host : str, port : int, instance : str = "default", attack_send_handler = None, attack_recv_handler = None):
         super().__init__(host, port)
+        self.instance = instance
         self.socket.connect((self.host, self.port))
         self.client_socket = networkstack.ClientSocket(self.socket)
 
@@ -63,7 +65,7 @@ class Client(NetworkService):
 
             elif input_ == "rsa":
                 # RSA handshake!
-                packet, self.my_rsa_priv = RSA_Main.build_rsa_init_packet()
+                packet, self.my_rsa_priv = RSA_Main.build_rsa_init_packet(self.instance + "_client_key.json")
                 if self.network_thread.is_alive():
                     self.send(packet.encode("utf-8"))
 
@@ -122,7 +124,15 @@ class Client(NetworkService):
         message = data.decode("utf-8")
 
         if message.startswith("RSA_INIT:"):
-            self.peer_rsa_pub = RSA_Main.process_rsa_init_packet(message)
+            saved_public, _ = RSA_Logic.load_keys_from_json(self.instance + "_server_key.json")
+            received_public = RSA_Main.process_rsa_init_packet(message)
+            if(saved_public is not None):
+                if(saved_public != received_public):
+                    print("Received and saved server public keys do not match! An attacker might be involved....")
+                    return
+            
+            self.peer_rsa_pub = received_public
+            RSA_Logic.save_keys_to_json(self.peer_rsa_pub, tuple([None, None]), self.instance + "_server_key.json")
             print("SUCCESS: Exchanged RSA Public Keys with the Server!")
             return
 
@@ -164,7 +174,7 @@ class Server(NetworkService):
         # RSA handling
         self.client_rsa_keys = {}
         # Load server's keys
-        _, self.my_rsa_priv = RSA_Main.build_rsa_init_packet()
+        _, self.my_rsa_priv = RSA_Main.build_rsa_init_packet("server_key.json")
 
         print("server started")
 
@@ -180,7 +190,7 @@ class Server(NetworkService):
             client_pub = RSA_Main.process_rsa_init_packet(message)
             self.client_rsa_keys[sender.port] = client_pub
 
-            packet, _ = RSA_Main.build_rsa_init_packet()
+            packet, _ = RSA_Main.build_rsa_init_packet("server_key.json")
             sender.send(packet.encode("utf-8"))
             return
 
