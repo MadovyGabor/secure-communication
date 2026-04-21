@@ -1,6 +1,7 @@
 from diffieHellman import DHNetwork
 from RSA import RSA_Main
-import socket, threading, time
+from GCM.GCM import aes_gcm_encrypt, aes_gcm_decrypt
+import socket, threading, time, os
 from abc import abstractmethod
 
 import networkstack
@@ -220,10 +221,17 @@ class Server(NetworkService):
                 self.send_encrypted_to_client(client_socket, encoded_message, client_secret)
     
     # helper function for encrypting data and sending it to a client
-    def send_encrypted_to_client(self, client_socket, data, secret, handler = None, handler_args = ()):
+    def send_encrypted_to_client(self, client_socket, data: bytes, secret, handler = None, handler_args = ()):
         # tady přijde AES-GCM šifrování
-        encrypted_data = data
-        client_socket.send(encrypted_data, handler, handler_args)
+        nonce = os.urandom(12)
+
+        ciphertext, tag = aes_gcm_encrypt(nonce, secret, data)
+
+        packet = nonce + tag + ciphertext
+
+        length = len(packet).to_bytes(4, 'big')
+
+        client_socket.sendall(length + packet)
     
     def shutdown(self):
         self.server_socket.shutdown()
