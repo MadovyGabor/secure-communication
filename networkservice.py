@@ -221,8 +221,17 @@ class Server(NetworkService):
                 self.send_encrypted_to_client(client_socket, encoded_message, client_secret)
     
     # helper function for encrypting data and sending it to a client
-    def send_encrypted_to_client(self, client_socket, data: bytes, secret, handler = None, handler_args = ()):
-        # tady přijde AES-GCM šifrování
+    def send_encrypted_to_client(self, client_socket, data: bytes, secret: bytes, handler = None, handler_args = ()):
+        # AES-GCM
+        if not isinstance(data, (bytes, bytearray)):
+            raise TypeError("data must be bytes-like")
+
+        if not isinstance(secret, bytes):
+            raise TypeError("key must be bytes")
+
+        if len(secret) not in (16, 24, 32):
+            raise ValueError("Invalid AES key length")
+
         nonce = os.urandom(12)
 
         ciphertext, tag = aes_gcm_encrypt(nonce, secret, data)
