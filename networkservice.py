@@ -18,12 +18,19 @@ class NetworkService():
 
     # helper function for decrypting and decoding received data
     def decrypt_and_decode(self, encrypted_data, secret):
-        # tady přijde AES-GCM dešifrování
-        decrypted_data = encrypted_data
-        decoded_message = decrypted_data.decode("utf-8")
+        # tady přijde AES-GCM dešifrováníň
 
-        return decoded_message
-    
+        length = int.from_bytes(encrypted_data[:4], 'big')
+        packet = encrypted_data[4:]
+
+        nonce = packet[:12]
+        tag = packet[12:28]
+        ciphertext = packet[28:]
+
+        decrypted_data = aes_gcm_decrypt(nonce, secret, ciphertext, tag)
+        return decrypted_data.decode("utf-8", errors="ignore")
+
+
     @abstractmethod
     def shutdown(self):
         pass
@@ -54,7 +61,8 @@ class Client(NetworkService):
     def loop(self):
         while self.network_thread.is_alive():
             input_ = input()
-            if(input_ == "exit"):
+
+            if input_ == "exit":
                 self.lock.acquire()
                 self.client_socket.shutdown()
                 self.lock.release()
@@ -107,9 +115,13 @@ class Client(NetworkService):
             self.attack_send_handler(self.client_socket, data)
 
     def send_encrypted_to_server(self, data, shared_secret):
-        # Tady přijde AES-GCM šifrování
-        encrypted_data = data # AES_GCM(data, shared_secret)
-        self.send(encrypted_data)
+        nonce = os.urandom(12)
+        ciphertext, tag = aes_gcm_encrypt(nonce, shared_secret, data)
+
+        packet = nonce + tag + ciphertext
+        length = len(packet).to_bytes(4, 'big')
+
+        self.send(length + packet)
 
     def recv(self, sender_socket, data : bytes):
         if(self.attack_recv_handler is None):
@@ -118,14 +130,17 @@ class Client(NetworkService):
             self.attack_recv_handler(self.client_socket, self.receive_handler, data)
 
     def receive_handler(self, sender_socket, data : bytes):
-        message = data.decode("utf-8")
+        try:
+            message = data.decode("utf-8")
+        except:
+            message = None
 
-        if message.startswith("RSA_INIT:"):
+        if message is not None and message.startswith("RSA_INIT:"):
             self.peer_rsa_pub = RSA_Main.process_rsa_init_packet(message)
             print("SUCCESS: Exchanged RSA Public Keys with the Server!")
             return
 
-        if message.startswith("RSA_AUTH:"):
+        if message is not None and message.startswith("RSA_AUTH:"):
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, self.peer_rsa_pub)
             if not is_valid:
                 print("HACKER DETECTED! Dropping packet.")
@@ -133,7 +148,7 @@ class Client(NetworkService):
 
             message = inner_message
 
-        if message.startswith("DH_ACCEPT:"):
+        if message is not None and message.startswith("DH_ACCEPT:"):
             self.shared_secret = DHNetwork.process_accept_packet(message, self.p, self.private_key)
             print(f"shared secret: {str(self.shared_secret)[:15]}...")
             return
@@ -172,10 +187,13 @@ class Server(NetworkService):
             self.server_socket.process(self.receive_handler)
 
     def receive_handler(self, sender, data: bytes):
-        message = data.decode("utf-8")
+        try:
+            message = data.decode("utf-8")
+        except:
+            message = None
 
         # 1. Incoming Client RSA Key
-        if message.startswith("RSA_INIT:"):
+        if message is not None and message.startswith("RSA_INIT:"):
             client_pub = RSA_Main.process_rsa_init_packet(message)
             self.client_rsa_keys[sender.port] = client_pub
 
@@ -184,7 +202,7 @@ class Server(NetworkService):
             return
 
         # 2. authenticated Client Messages
-        if message.startswith("RSA_AUTH:"):
+        if message is not None and message.startswith("RSA_AUTH:"):
             client_pub = self.client_rsa_keys.get(sender.port)
             if not client_pub:
                 print("Error: Client has not exchanged RSA keys yet.")
@@ -210,15 +228,22 @@ class Server(NetworkService):
         if(sender.port not in self.client_secrets):
             sender.send("Type 'rsa' and then 'dh' to start communicating securely".encode("utf-8"))
             return
+        
+        # decrypt incoming správu
+        try:
+            plaintext = self.decrypt_and_decode(data, self.client_secrets[sender.port])
+        except Exception as e:
+            print("Decryption failed:", e)
+            return
+        
+        out = "{}: {}".format(sender.port, plaintext).encode("utf-8")
 
-        resend = "{}: {}".format(sender.port, message)
         for client_port in self.server_socket.clients:
             if (client_port != sender.port and client_port in self.client_secrets):
                 client_socket = self.server_socket.clients[client_port]
-                encoded_message = resend.encode("utf-8")
                 client_secret = self.client_secrets[client_port]
-                
-                self.send_encrypted_to_client(client_socket, encoded_message, client_secret)
+        
+                self.send_encrypted_to_client(client_socket, out, client_secret)
     
     # helper function for encrypting data and sending it to a client
     def send_encrypted_to_client(self, client_socket, data: bytes, secret: bytes, handler = None, handler_args = ()):
@@ -259,4 +284,4 @@ class Attacker():
         self.client = Client(host, port, self.send_handler, self.recv_handler)
 
     def get_service(self):
-        return self.clientw
+        return self.client
