@@ -30,6 +30,8 @@ class ClientSocket():
         if(len(data) > 2**(4 * 8)):
             print("Data too big")
             return False
+        elif(len(data) == 0):
+            return True
         
         header_buff = (len(data)).to_bytes(4, 'big')
         buff = bytearray()

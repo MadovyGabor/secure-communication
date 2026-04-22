@@ -5,20 +5,6 @@ import hashlib
 
 from . import RSA_Math as RSALogic
 
-def build_rsa_init_packet() -> tuple[str, tuple[int, int]]:
-
-    #  the initial packet to share this nodes public key.
-
-    print("[RSA Protocol] Generating RSA parameters (this might take a few seconds)...")
-    public_key, private_key = RSALogic.generate_rsa_parameters(1024)
-    e, n = public_key
-
-    packet = f"RSA_INIT:{e}:{n}"
-    print("[RSA Protocol] RSA_INIT packet built successfully. Ready to send.")
-
-    return packet, private_key
-
-
 def process_rsa_init_packet(message: str) -> tuple[int, int]:
 
     # Examines the recieved the RSAbpacket
@@ -68,17 +54,19 @@ def process_rsa_auth_packet(message: str, peer_public_key: tuple[int, int]) -> t
 
     return is_valid, text_message
 
-def build_rsa_init_packet() -> tuple[str, tuple[int, int]]:
+def build_rsa_init_packet(filename = None) -> tuple[str, tuple[int, int]]:
 
     # the initial packet to share this nodes public key.
     # Loads existing keys from JSON, or generates and saves new ones if none exist.
 
-    public_key, private_key = RSALogic.load_keys_from_json()
+    public_key, private_key = None, None
+    if(filename is not None):
+        public_key, private_key = RSALogic.load_keys_from_json(filename)
 
     if public_key is None or private_key is None:
         print("[RSA Protocol] Generating RSA parameters (this might take a few seconds)...")
         public_key, private_key = RSALogic.generate_rsa_parameters(1024)
-        RSALogic.save_keys_to_json(public_key, private_key)
+        RSALogic.save_keys_to_json(public_key, private_key, filename)
 
     e, n = public_key
 
