@@ -1,4 +1,4 @@
-from gcm_utils import xor_bytes, split_blocks
+from GCM.gcm_utils import xor_bytes, split_blocks
 
 def gf_multiply(x: bytes, h: bytes) -> bytes:
     R = 0xe1000000000000000000000000000000

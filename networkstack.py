@@ -102,8 +102,9 @@ class ClientSocket():
         return True
 
     def shutdown(self):
-        self.socket.close()
-        self.socket = None
+        if(self.socket is not None):
+            self.socket.close()
+            self.socket = None
 
 class ServerSocket():
     def __init__(self, server_socket):

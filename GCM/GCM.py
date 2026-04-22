@@ -3,12 +3,9 @@ Advaned Encryption Standard - Galois/Counter Mode
 Oliver Synak 
 """
 
-
-
-
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from gcm_utils import xor_bytes, inc32
-from gf import GHASH
+from GCM.gcm_utils import xor_bytes, inc32
+from GCM.gf import GHASH
 import hmac
 
 

@@ -19,8 +19,6 @@ class NetworkService():
 
     # helper function for decrypting and decoding received data
     def decrypt_and_decode(self, encrypted_data, secret):
-        # tady přijde AES-GCM dešifrováníň
-
         length = int.from_bytes(encrypted_data[:4], 'big')
         packet = encrypted_data[4:]
 
@@ -272,10 +270,9 @@ class Server(NetworkService):
         ciphertext, tag = aes_gcm_encrypt(nonce, secret, data)
 
         packet = nonce + tag + ciphertext
-
         length = len(packet).to_bytes(4, 'big')
 
-        client_socket.sendall(length + packet)
+        client_socket.send(length + packet)
     
     def shutdown(self):
         self.server_socket.shutdown()
