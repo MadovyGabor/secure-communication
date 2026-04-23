@@ -18,7 +18,8 @@ class NetworkService():
         pass
 
     # helper function for decrypting and decoding received data
-    def decrypt_and_decode(self, encrypted_data, secret):
+    @staticmethod
+    def decrypt_and_decode(encrypted_data, secret):
         length = int.from_bytes(encrypted_data[:4], 'big')
         packet = encrypted_data[4:]
 
@@ -112,7 +113,7 @@ class Client(NetworkService):
         if(self.attack_send_handler is None):
             self.client_socket.send(data)
         else:
-            self.attack_send_handler(self.client_socket, data)
+            self.attack_send_handler(self.client_socket, self.receive_handler, data)
 
     def send_encrypted_to_server(self, data, shared_secret):
         nonce = os.urandom(12)
@@ -278,17 +279,97 @@ class Server(NetworkService):
         self.server_socket.shutdown()
 
 class Attacker():
-    def send_handler(self, client_socket, data):
-        print("sent", data)
-        client_socket.send(b"i totally sent this lol")
+    def send_handler(self, client_socket, client_receive_handler, data):
+        try:
+            message = data.decode("utf-8")
+        except:
+            message = None
+
+        # klient si snaží se serverem vyměnit RSA klíč. podstrčím jim vlastní ;)
+        if message is not None and message.startswith("RSA_INIT:"):
+            self.client_public = RSA_Main.process_rsa_init_packet(message)
+            attacker_packet, self.attacker_rsa_priv = RSA_Main.build_rsa_init_packet()
+            attacker_packet = attacker_packet.encode("utf-8")
+            
+            # poslat klientovi
+            client_receive_handler(client_socket, attacker_packet)
+            
+            # poslat serveru
+            client_socket.send(attacker_packet)
+            return
+
+        if message is not None and message.startswith("RSA_AUTH:"):
+            _, inner_message = RSA_Main.process_rsa_auth_packet(message, self.client_public)
+            if inner_message.startswith("DH_INIT:"):
+                # vytvořit shared secret mezi útočníkem a klientem
+                dh_attacker_reply_packet, self.attacker_client_shared_secret = DHNetwork.process_init_packet(inner_message)
+                attacker_client_auth_reply = RSA_Main.build_rsa_auth_packet(dh_attacker_reply_packet, self.attacker_rsa_priv)
+                client_receive_handler(client_socket, attacker_client_auth_reply.encode("utf-8"))
+
+                # vytvořit shared secret mezi úročníkem a serverem
+                attacker_server_dh_packet, self.attacker_server_p, self.attacker_server_g, self.attacker_server_private_key = DHNetwork.build_init_packet()
+                attacker_server_auth_packet = RSA_Main.build_rsa_auth_packet(attacker_server_dh_packet, self.attacker_rsa_priv)
+                client_socket.send(attacker_server_auth_packet.encode("utf-8"))
+            
+            return
+
+        if(self.attacker_client_shared_secret is not None):
+            # šifrovaná komunikace
+            decrypted_message = NetworkService.decrypt_and_decode(data, self.attacker_client_shared_secret)
+            print("attacker sees from client: ", decrypted_message)
+            
+            # zašifrovat shared secretem mezi útočníkem a sevrerem a poslat serveru
+            nonce = os.urandom(12)
+            ciphertext, tag = aes_gcm_encrypt(nonce, self.attacker_server_shared_secret, decrypted_message.encode("utf-8"))
+
+            packet = nonce + tag + ciphertext
+            length = len(packet).to_bytes(4, 'big')
+
+            # přeposlat serveru
+            client_socket.send(length + packet)
+        else:
+            client_socket.send(data)
 
     def recv_handler(self, client_socket, client_receive_handler, data):
-        print("received", data)
-        client_socket.send(b"this is a totally authentic reply")
-        client_receive_handler(client_socket, b"you totally received this")
+        try:
+            message = data.decode("utf-8")
+        except:
+            message = None
+
+        # server odpovídá klientovi (útočníkovi) na jeho RSA_INIT dotaz svým veřejným klíčem
+        if message is not None and message.startswith("RSA_INIT:"):
+            self.server_public = RSA_Main.process_rsa_init_packet(message)
+            return
+        
+        if message is not None and message.startswith("RSA_AUTH:"):
+            _, inner_message = RSA_Main.process_rsa_auth_packet(message, self.server_public)
+            message = inner_message
+
+        if message is not None and message.startswith("DH_ACCEPT:"):
+            self.attacker_server_shared_secret = DHNetwork.process_accept_packet(message, self.attacker_server_p, self.attacker_server_private_key)
+            print(f"mam secret mezi utocnikem a serverem {self.attacker_server_shared_secret}")
+            return
+        
+        if(self.attacker_server_shared_secret is not None):
+            # šifrovaná komunikace
+            decrypted_message = NetworkService.decrypt_and_decode(data, self.attacker_server_shared_secret)
+            print("attacker sees from server: ", decrypted_message)
+            
+            nonce = os.urandom(12)
+            ciphertext, tag = aes_gcm_encrypt(nonce, self.attacker_client_shared_secret, decrypted_message.encode("utf-8"))
+
+            packet = nonce + tag + ciphertext
+            length = len(packet).to_bytes(4, 'big')
+
+            # přeposlat klientovi
+            client_receive_handler(client_socket, length + packet)
+        else:
+            client_receive_handler(client_socket, data)
     
-    def __init__(self, host : str, port : int):
-        self.client = Client(host, port, self.send_handler, self.recv_handler)
+    def __init__(self, host : str, port : int, instance : str):
+        self.client = Client(host, port, instance, self.send_handler, self.recv_handler)
+        self.attacker_server_shared_secret = None
+        self.attacker_client_shared_secret = None
 
     def get_service(self):
         return self.client

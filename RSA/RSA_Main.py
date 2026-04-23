@@ -66,7 +66,8 @@ def build_rsa_init_packet(filename = None) -> tuple[str, tuple[int, int]]:
     if public_key is None or private_key is None:
         print("[RSA Protocol] Generating RSA parameters (this might take a few seconds)...")
         public_key, private_key = RSALogic.generate_rsa_parameters(1024)
-        RSALogic.save_keys_to_json(public_key, private_key, filename)
+        if(filename is not None):
+            RSALogic.save_keys_to_json(public_key, private_key, filename)
 
     e, n = public_key
 
