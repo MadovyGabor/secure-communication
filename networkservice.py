@@ -305,7 +305,7 @@ class Attacker():
             _, inner_message = RSA_Main.process_rsa_auth_packet(message, self.client_public)
             if inner_message.startswith("DH_INIT:"):
                 # vytvořit shared secret mezi útočníkem a klientem
-                dh_attacker_reply_packet, self.attacker_client_shared_secret = DHNetwork.process_init_packet(inner_message)
+                dh_attacker_reply_packet, _, self.attacker_client_shared_secret = DHNetwork.process_init_packet(inner_message)
                 attacker_client_auth_reply = RSA_Main.build_rsa_auth_packet(dh_attacker_reply_packet, self.attacker_rsa_priv)
                 client_receive_handler(client_socket, attacker_client_auth_reply.encode("utf-8"))
 
@@ -323,6 +323,7 @@ class Attacker():
             
             # zašifrovat shared secretem mezi útočníkem a sevrerem a poslat serveru
             nonce = os.urandom(12)
+            print(self.attacker_server_shared_secret)
             ciphertext, tag = aes_gcm_encrypt(nonce, self.attacker_server_shared_secret, decrypted_message.encode("utf-8"))
 
             packet = nonce + tag + ciphertext
@@ -349,7 +350,7 @@ class Attacker():
             message = inner_message
 
         if message is not None and message.startswith("DH_ACCEPT:"):
-            self.attacker_server_shared_secret = DHNetwork.process_accept_packet(message, self.attacker_server_p, self.attacker_server_private_key)
+            _, self.attacker_server_shared_secret = DHNetwork.process_accept_packet(message, self.attacker_server_p, self.attacker_server_private_key)
             print(f"mam secret mezi utocnikem a serverem {self.attacker_server_shared_secret}")
             return
         
