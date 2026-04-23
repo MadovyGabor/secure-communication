@@ -9,8 +9,8 @@ def main(mode, host, port, instance):
         service = networkservice.Client(host, port, instance)
     elif(mode == "server"):
         service = networkservice.Server(host, port)
-    elif(mode == "attack"):
-        attacker = networkservice.Attacker(host, port)
+    elif(mode == "attacker"):
+        attacker = networkservice.Attacker(host, port, instance)
         service = attacker.get_service()
     else:
         exit()
@@ -25,7 +25,7 @@ host : str = sys.argv[2]
 port : int = int(sys.argv[3])
 instance : str = "default"
 
-if(mode == "client"):
+if(mode == "client" or mode == "attacker"):
     if(len(sys.argv) >= 4 + 1):
         instance = sys.argv[4]
 
