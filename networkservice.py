@@ -48,7 +48,8 @@ class Client(NetworkService):
         self.p = None
         self.g = None
         self.private_key = None
-        self.shared_secret = None
+        self.raw_dh_secret = None
+        self.aes_session_key = None
 
         # --- RSA parameters ---
         self.peer_rsa_pub = None
@@ -90,8 +91,8 @@ class Client(NetworkService):
                 if(self.network_thread.is_alive()):
                     encoded_message = input_.encode("utf-8")
                     
-                    if(self.shared_secret is not None):
-                        self.send_encrypted_to_server(encoded_message, self.shared_secret)
+                    if(self.aes_session_key is not None):
+                        self.send_encrypted_to_server(encoded_message, self.aes_session_key)
                     else:
                         print("sending unencrypted message")
                         self.send(encoded_message)  
@@ -114,9 +115,9 @@ class Client(NetworkService):
         else:
             self.attack_send_handler(self.client_socket, data)
 
-    def send_encrypted_to_server(self, data, shared_secret):
+    def send_encrypted_to_server(self, data, aes_session_key):
         nonce = os.urandom(12)
-        ciphertext, tag = aes_gcm_encrypt(nonce, shared_secret, data)
+        ciphertext, tag = aes_gcm_encrypt(nonce, aes_session_key, data)
 
         packet = nonce + tag + ciphertext
         length = len(packet).to_bytes(4, 'big')
@@ -157,13 +158,13 @@ class Client(NetworkService):
             message = inner_message
 
         if message is not None and message.startswith("DH_ACCEPT:"):
-            self.shared_secret = DHNetwork.process_accept_packet(message, self.p, self.private_key)
-            print(f"shared secret: {str(self.shared_secret)[:15]}...")
+            self.raw_dh_secret, self.aes_session_key = DHNetwork.process_accept_packet(message, self.p, self.private_key)
+            print(f"raw DH secret: {str(self.raw_dh_secret)[:15]}...")
             return
 
         # received encrypted message
-        if(self.shared_secret is not None):
-            decrypted_message = self.decrypt_and_decode(data, self.shared_secret)
+        if(self.aes_session_key is not None):
+            decrypted_message = self.decrypt_and_decode(data, self.aes_session_key)
             print(decrypted_message)
         else:
             print("Received unencrypted message!")
@@ -180,8 +181,9 @@ class Server(NetworkService):
         
         self.server_socket = networkstack.ServerSocket(self.socket)
 
-        #DH handling: port -> shared secret
-        self.client_secrets = {}
+        #DH handling: port -> keys
+        self.client_aes_keys = {}
+        self.client_raw_dh_secrets = {}
 
         # RSA handling
         self.client_rsa_keys = {}
@@ -223,23 +225,24 @@ class Server(NetworkService):
 
             # If authentic
             if inner_message.startswith("DH_INIT:"):
-                dh_reply_packet, shared_secret = DHNetwork.process_init_packet(inner_message)
-                self.client_secrets[sender.port] = shared_secret
+                dh_reply_packet, raw_dh_secret, aes_session_key = DHNetwork.process_init_packet(inner_message)
+                self.client_raw_dh_secrets[sender.port] = raw_dh_secret
+                self.client_aes_keys[sender.port] = aes_session_key
 
                 auth_reply = RSA_Main.build_rsa_auth_packet(dh_reply_packet, self.my_rsa_priv)
                 sender.send(auth_reply.encode("utf-8"))
 
-                print(f"shared secret: {str(shared_secret)[:15]}...")
+                print(f"raw DH secret: {str(raw_dh_secret)[:15]}...")
                 return
         
         # 3. encrypted client messages
-        if(sender.port not in self.client_secrets):
+        if(sender.port not in self.client_aes_keys):
             sender.send("Type 'rsa' and then 'dh' to start communicating securely".encode("utf-8"))
             return
         
         # decrypt incoming správu
         try:
-            plaintext = self.decrypt_and_decode(data, self.client_secrets[sender.port])
+            plaintext = self.decrypt_and_decode(data, self.client_aes_keys[sender.port])
         except Exception as e:
             print("Decryption failed:", e)
             return
@@ -247,11 +250,11 @@ class Server(NetworkService):
         out = "{}: {}".format(sender.port, plaintext).encode("utf-8")
 
         for client_port in self.server_socket.clients:
-            if (client_port != sender.port and client_port in self.client_secrets):
+            if (client_port != sender.port and client_port in self.client_aes_keys):
                 client_socket = self.server_socket.clients[client_port]
-                client_secret = self.client_secrets[client_port]
+                client_aes_key = self.client_aes_keys[client_port]
         
-                self.send_encrypted_to_client(client_socket, out, client_secret)
+                self.send_encrypted_to_client(client_socket, out, client_aes_key)
     
     # helper function for encrypting data and sending it to a client
     def send_encrypted_to_client(self, client_socket, data: bytes, secret: bytes, handler = None, handler_args = ()):

@@ -19,7 +19,7 @@ def build_init_packet() -> tuple[str, int, int, int]:
     return raw_packet, p, g, private_key
 
 
-def process_init_packet(message: str) -> tuple[str, bytes]:
+def process_init_packet(message: str) -> tuple[str, int, bytes]:
     """
     Called by the Responder: Parses DH_INIT, validates keys, generates local keys, 
     derives AES key, and builds DH_ACCEPT response.
@@ -53,10 +53,10 @@ def process_init_packet(message: str) -> tuple[str, bytes]:
     raw_accept = f"DH_ACCEPT:{my_public_key}"
     print("[DH Protocol] DH_ACCEPT packet built successfully. Ready to send.")
 
-    return raw_accept, aes_key
+    return raw_accept, shared_secret, aes_key
 
 
-def process_accept_packet(message: str, p: int, private_key: int) -> bytes:
+def process_accept_packet(message: str, p: int, private_key: int) -> tuple[int, bytes]:
     """
     Called by the Initiator: Parses DH_ACCEPT, validates key, and derives the final AES key.
     """
@@ -82,4 +82,4 @@ def process_accept_packet(message: str, p: int, private_key: int) -> bytes:
 
     print("[DH Protocol] Handshake complete! 32-byte AES key derived securely.")
 
-    return aes_key
+    return shared_secret, aes_key
