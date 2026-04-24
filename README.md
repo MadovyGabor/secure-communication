@@ -48,7 +48,7 @@
     - při odeslání zprávy:
         - vygeneruje se náhodný nonce -> zpráva se zašifruje -> vytvoří se packet ve tvaru: ``length | nonce | tag | ciphertext``
     - při přijetí zprávy:
-        - zpráva se dešifruje pomocí AES klíče -> ověří se autentizační tag - > pokud ověření selže, zpráva se zahodí / pokud je validní, zobrazí se uživateli
+        - zpráva se dešifruje pomocí AES klíče -> ověří se autentizační tag -> pokud ověření selže, zpráva se zahodí / pokud je validní, zobrazí se uživateli
 - server
     - po úspěšném DH uchovává AES klíč pro každého klienta zvlášť
     - při přijetí zprávy od klienta:
