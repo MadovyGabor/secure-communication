@@ -43,16 +43,16 @@
 
 ### AES-GCM
 - klient
-    -  po úspěšné výměně klíčů pomocí příkazu dh se vytvoří symetrický AES session key
+    -  po úspěšné výměně klíčů pomocí příkazu ``dh`` se vytvoří symetrický AES session key
     - všechny následující zprávy se odesílají šifrované pomocí AES-GCM
     - při odeslání zprávy:
-        - vygeneruje se náhodný nonce -> zpráva se zašifruje -> vytvoří se packet obsahující nonce, tag a ciphertext
+        - vygeneruje se náhodný nonce -> zpráva se zašifruje -> vytvoří se packet ve tvaru: ``length | nonce | tag | ciphertext``
     - při přijetí zprávy:
         - zpráva se dešifruje pomocí AES klíče -> ověří se autentizační tag - > pokud ověření selže, zpráva se zahodí / pokud je validní, zobrazí se uživateli
 - server
     - po úspěšném DH uchovává AES klíč pro každého klienta zvlášť
     - při přijetí zprávy od klienta:
-        - zprávu dešifruje pomocí jeho AES klíče -> vytvoří novou zprávu ve tvaru port: zpráva
+        - zprávu dešifruje pomocí jeho AES klíče -> vytvoří novou zprávu ve tvaru ``port: zpráva``
     - při odeslání ostatním klientům:
         - zprávu znovu zašifruje AES klíčem daného klienta -> odešle ji jako nový packet
 - útočník
