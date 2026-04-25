@@ -33,14 +33,30 @@
     - při výměně klíčů podstrčí klientovi a serveru vlastní veřejný klíč
     - selže, pokud má klient uložený veřejný klíč serveru z předešlé relace, která nebyla kompromitována
 
-### Diffie-Hellman
-- klient
-    - po úspěšné výměně klíčů použít příkaz ``dh``
-    - při úspěchu bude následující komunikace zašifrována pomocí AES-GCM
-- útočník
-    - vymění se klíče jak s klientem, tak se serverem
-    - při úspěchu může odposlouchávat komunikaci mezi klientem a serverem
+### Diffie-Hellman & KDF
+Tento modul zajišťuje bezpečné ustavení sdíleného tajemství a následnou derivaci 256-bitového symetrického klíče pro AES.
 
+**Technická specifikace:**
+- **Parametry:** Protokol využívá fixní parametry **RFC 3526 MODP Group 14** (2048-bitové bezpečné prvočíslo $p$ a generátor $g=2$).
+- **KDF (Key Derivation):** Surové tajemství (shared secret) je transformováno na finální klíč pomocí funkce **HKDF** (HMAC-based Key Derivation Function) s algoritmem **SHA-256**.
+- **Bezpečnost:** Implementace **Ephemeral Diffie-Hellman (DHE)** zajišťuje *Perfect Forward Secrecy*. Veřejné klíče jsou validovány proti útokům na malé podgrupy (*Small Subgroup Attacks*).
+
+**Klíčové funkce:**
+- `DHLogic.py`:
+  - `generate_private_key(p)`: Generuje kryptograficky bezpečný privátní exponent.
+  - `is_valid_public_key(public_key, p)`: Ověřuje, zda přijatý veřejný klíč leží v bezpečném intervalu $(1, p-1)$.
+  - `derive_aes_key(shared_secret)`: Provádí derivaci 32-bajtového klíče pomocí HKDF-SHA256.
+- `DHNetwork.py`:
+  - `build_init_packet()`: Sestavuje iniciační paket `DH_INIT` pro zahájení výměny.
+  - `process_init_packet()` & `process_accept_packet()`: Zpracovávají síťovou logiku handshaku a provádějí finální výpočet klíče.
+
+**Průběh v aplikaci:**
+- **klient**
+  - po úspěšné výměně RSA klíčů použít příkaz ``dh``
+  - proběhne handshake; parametry jsou podepsány RSA pro eliminaci MitM útoků
+  - při úspěchu bude následující komunikace zašifrována pomocí AES-GCM
+- **útočník**
+  - pokusí se vyměnit klíče s oběma stranami; je úspěšný pouze pokud není handshake autentizován RSA (v opačném případě RSA podpis odhalí manipulaci)
 ### AES-GCM
 - klient
     -  po úspěšné výměně klíčů pomocí příkazu ``dh`` se vytvoří symetrický AES session key
