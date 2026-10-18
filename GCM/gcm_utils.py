@@ -20,10 +20,3 @@ def split_blocks(data: bytes, block_size=16) -> list[bytes]:
             block += b'\x00' * (block_size - len(block))
         result.append(block)
     return result
-
-def split_blocks_no_padding(data: bytes, block_size = 16) -> list[bytes]:
-    result = []
-    for i in range(0,len(data),block_size):
-        block = data[i:i+block_size]
-        result.append(block)
-    return result

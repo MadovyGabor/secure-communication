@@ -1,5 +1,4 @@
 import sympy
-import sympy
 import json
 import os
 
@@ -66,12 +65,15 @@ def load_keys_from_json(filename: str = "rsa_keys.json") -> tuple[tuple[int, int
 
     print(f"[RSA Protocol] Loading existing keys from '{filename}'...")
 
-    with open(filename, 'r') as json_file:
-        key_data = json.load(json_file)
+    try:
+        with open(filename, 'r') as json_file:
+            key_data = json.load(json_file)
 
-    e = key_data["public_key"]["e"]
-    n = key_data["public_key"]["n"]
-    d = key_data["private_key"]["d"]
+        e = key_data["public_key"]["e"]
+        n = key_data["public_key"]["n"]
+        d = key_data["private_key"]["d"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise ValueError(f"Key file '{filename}' is corrupted ({error!r}). Fix or delete it.") from error
 
     public_key = (e, n)
     private_key = (d, n)

@@ -1,5 +1,3 @@
-import socket
-import json
 import select
 
 MSG_PREFIX_SIZE = 4
@@ -27,7 +25,7 @@ class ClientSocket():
             self.port = self.socket.getpeername()[1]
 
     def send(self, data, handler = None, handler_args = ()):
-        if(len(data) > 2**(4 * 8)):
+        if(len(data) >= 2**(4 * 8)):
             print("Data too big")
             return False
         elif(len(data) == 0):
@@ -43,16 +41,17 @@ class ClientSocket():
 
         return True
 
-    # blocking!
-    def process(self, recv_handler, recv_handler_args = ()):
+    # blocks until the socket is readable, queued data can be written, or timeout (seconds)
+    def process(self, recv_handler, recv_handler_args = (), timeout = 60):
         result = True
-        ready_to_read, ready_to_write, in_error = select.select([self.socket], [self.socket], [self.socket], 60)
+        to_write = [self.socket] if self.send_queue else []
+        ready_to_read, ready_to_write, in_error = select.select([self.socket], to_write, [self.socket], timeout)
         if(len(ready_to_read) != 0):
             result = self.process_reading(recv_handler, recv_handler_args)
         if(len(ready_to_write) != 0):
             self.process_writing()
         if(len(in_error) != 0):
-            print("erroooor")
+            print("socket error condition on connection", self.port)
 
         return result
 
@@ -84,7 +83,10 @@ class ClientSocket():
             else:
                 recv_len = MSG_PREFIX_SIZE - len(state.header_buff)
 
-        received = self.socket.recv(recv_len)
+        try:
+            received = self.socket.recv(recv_len)
+        except ConnectionError:
+            received = b"" # reset by peer is a disconnect too
         if(received == b""):
             self.recv_queue.pop(0)
             return False # disconnected
@@ -96,7 +98,7 @@ class ClientSocket():
             else:
                 state.data_buff = state.data_buff + received
                 if(len(state.data_buff) == state.data_len):
-                    recv_handler(*recv_handler_args, self, state.data_buff) # TODO: event
+                    recv_handler(*recv_handler_args, self, state.data_buff)
                     self.recv_queue.pop(0)
 
         return True
@@ -107,63 +109,74 @@ class ClientSocket():
             self.socket = None
 
 class ServerSocket():
-    def __init__(self, server_socket):
+    def __init__(self, server_socket, on_disconnect = None):
         self.server_socket = server_socket
         self.clients = {}
+        self.on_disconnect = on_disconnect # called with the client's port
 
-    # blocking
-    def process(self, recv_handler, recv_handler_args = ()):
+    # blocks until a socket is readable, queued data can be written, or timeout (seconds)
+    def process(self, recv_handler, recv_handler_args = (), timeout = 60):
         sockets_to_read = [self.server_socket]
         sockets_to_write = []
-        clients_to_remove = []
-        for key in self.clients:
-            # kontrola odpojených socketů
-            try:
-                self.clients[key].socket.getpeername()
-            except OSError:
-                clients_to_remove.append(key)
+        socket_ports = {}
+        for port, client in self.clients.items():
+            socket_ports[client.socket] = port
+            sockets_to_read.append(client.socket)
+            if(client.send_queue): # only wait for writability when there is something to send
+                sockets_to_write.append(client.socket)
+
+        ready_to_read, ready_to_write, in_error = select.select(sockets_to_read, sockets_to_write, [], timeout)
+
+        # a socket error on one client (e.g. connection reset) disconnects only that client
+        disconnected = set()
+        for sock in ready_to_read:
+            if(sock is self.server_socket):
+                self.accept_client()
                 continue
-            
-            socket = self.clients[key].socket
-            sockets_to_read.append(socket)
-            sockets_to_write.append(socket)
 
-        for key in clients_to_remove:
-            print("client", self.clients[key].port ,"disconnected")
-            self.clients.pop(key)
+            port = socket_ports[sock]
+            try:
+                connected = self.clients[port].process_reading(recv_handler, recv_handler_args)
+            except OSError:
+                connected = False
+            if(not connected):
+                disconnected.add(port)
 
-        ready_to_read, ready_to_write, in_error = select.select(sockets_to_read, sockets_to_write, [], 60)
-        
-        # pro případ, že se klient odpojí mezi select a prací se socketem
+        for sock in ready_to_write:
+            port = socket_ports[sock]
+            if(port in disconnected):
+                continue
+            try:
+                self.clients[port].process_writing()
+            except OSError:
+                disconnected.add(port)
+
+        for port in disconnected:
+            print("client", port, "disconnected")
+            self.clients.pop(port).shutdown()
+            if(self.on_disconnect is not None):
+                self.on_disconnect(port)
+
+    def accept_client(self):
         try:
-            for socket in ready_to_read:
-                if(self.server_socket == socket):
-                    conn, address = self.server_socket.accept()
-                    port = conn.getpeername()[1]
-                    if(port in self.clients):
-                        print("bruuuh")
-                        return
+            conn, address = self.server_socket.accept()
+            port = conn.getpeername()[1]
+        except OSError as e:
+            print("failed to accept connection:", e)
+            return
 
-                    client = ClientSocket(conn)
-                    self.clients[port] = client
-                    client.send(b"welcome to the server") # TODO: event
-                    print("client", port, "connected")
-                else:
-                    port = socket.getpeername()[1]
-                    client = self.clients[port]
-                    if(not client.process_reading(recv_handler, recv_handler_args)): # a client disconnected
-                        print("client", port, "disconnected")
-                        del self.clients[port]
-                        client.shutdown()
-                        if(socket in sockets_to_write):
-                            sockets_to_write.remove(socket)
-            
-            for socket in sockets_to_write:
-                self.clients[socket.getpeername()[1]].process_writing()
-        except OSError:
-            pass
+        if(port in self.clients):
+            print("rejected connection from", address, "- port", port, "already in use by another client")
+            conn.close()
+            return
+
+        client = ClientSocket(conn)
+        self.clients[port] = client
+        client.send(b"welcome to the server")
+        print("client", port, "connected")
 
     def shutdown(self):
-        for client in self.clients:
+        for client in self.clients.values():
             client.shutdown()
+        self.clients.clear()
         self.server_socket.close()

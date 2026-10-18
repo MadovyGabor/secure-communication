@@ -1,8 +1,6 @@
-import sympy
-import json
-import os
 import hashlib
 
+import protocol
 from . import RSA_Math as RSALogic
 
 def process_rsa_init_packet(message: str) -> tuple[int, int]:
@@ -11,10 +9,7 @@ def process_rsa_init_packet(message: str) -> tuple[int, int]:
 
     print("[RSA Protocol] Received RSA_INIT packet. Parsing parameters...")
 
-    # Split the message by colons to extract the values
-    parts = message.split(":")
-    e = int(parts[1])
-    n = int(parts[2])
+    e, n = protocol.parse_rsa_init(message)
 
     print(f"[RSA Protocol] Extracted Peer's Public Key: (e={e}, n={str(n)[:15]}...)")
 
@@ -23,23 +18,21 @@ def process_rsa_init_packet(message: str) -> tuple[int, int]:
 
 
 def build_rsa_auth_packet(text_message: str, my_private_key: tuple[int, int]) -> str:
-    print(f"[RSA Protocol] Signing outgoing message for authentication...")
+    print("[RSA Protocol] Signing outgoing message for authentication...")
     message_bytes = text_message.encode('utf-8')
     message_hash = hashlib.sha256(message_bytes).digest()
     message_int = int.from_bytes(message_hash, 'big')
 
     signature = RSALogic.rsa_sign(message_int, my_private_key)
 
-    packet = f"RSA_AUTH:{text_message}|{signature}"
+    packet = protocol.build_rsa_auth(text_message, signature)
     return packet
 
 
 def process_rsa_auth_packet(message: str, peer_public_key: tuple[int, int]) -> tuple[bool, str]:
     print("[RSA Protocol] Received RSA_AUTH packet. Verifying signature...")
 
-    data = message[9:]
-    text_message, signature_str = data.rsplit("|", 1)
-    signature = int(signature_str)
+    text_message, signature = protocol.parse_rsa_auth(message)
 
     message_bytes = text_message.encode('utf-8')
     message_hash = hashlib.sha256(message_bytes).digest()
@@ -48,15 +41,14 @@ def process_rsa_auth_packet(message: str, peer_public_key: tuple[int, int]) -> t
     is_valid = RSALogic.rsa_verify(message_int, signature, peer_public_key)
 
     if is_valid:
-        print(f"[RSA Protocol] AUTHENTICATION SUCCESS")
+        print("[RSA Protocol] AUTHENTICATION SUCCESS")
     else:
-        print(f"[RSA Protocol] WARNING: Signature invalid!")
+        print("[RSA Protocol] WARNING: Signature invalid!")
 
     return is_valid, text_message
 
-def build_rsa_init_packet(filename = None) -> tuple[str, tuple[int, int]]:
+def load_or_create_keys(filename = None) -> tuple[tuple[int, int], tuple[int, int]]:
 
-    # the initial packet to share this nodes public key.
     # Loads existing keys from JSON, or generates and saves new ones if none exist.
 
     public_key, private_key = None, None
@@ -69,9 +61,15 @@ def build_rsa_init_packet(filename = None) -> tuple[str, tuple[int, int]]:
         if(filename is not None):
             RSALogic.save_keys_to_json(public_key, private_key, filename)
 
+    return public_key, private_key
+
+def build_rsa_init_packet(public_key: tuple[int, int]) -> str:
+
+    # the initial packet to share this nodes public key.
+
     e, n = public_key
 
-    packet = f"RSA_INIT:{e}:{n}"
+    packet = protocol.build_rsa_init(e, n)
     print("[RSA Protocol] RSA_INIT packet built successfully. Ready to send.")
 
-    return packet, private_key
+    return packet
