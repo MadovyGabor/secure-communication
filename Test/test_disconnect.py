@@ -7,7 +7,8 @@ import tempfile
 import time
 import unittest
 
-import networkservice
+from attacker import Attacker
+from server import Server
 from diffieHellman import DHNetwork
 from Test.harness import free_port_pair
 
@@ -53,7 +54,7 @@ class InTempDir(unittest.TestCase):
 class TestServerForgetsClient(InTempDir):
 
     def test_keys_are_released_on_disconnect(self):
-        server = networkservice.Server("127.0.0.1", self.port, secure=False)
+        server = Server("127.0.0.1", self.port, secure=False)
         self.addCleanup(server.shutdown)
         step = lambda: server.server_socket.process(server.receive_handler)
 
@@ -80,7 +81,7 @@ class TestAttackerDropsRelay(InTempDir):
         upstream_listener.listen(1)
         self.sockets.append(upstream_listener)
 
-        attacker = networkservice.Attacker("127.0.0.1", self.port)
+        attacker = Attacker("127.0.0.1", self.port)
         self.addCleanup(attacker.shutdown)
 
         victim = self.connect(self.port + 1)

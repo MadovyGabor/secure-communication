@@ -120,13 +120,13 @@ class Scenario:
 
 
 class LocalClient:
-    """An in-process networkservice.Client connected to a bare listening socket in a temp CWD."""
+    """An in-process client.Client connected to a bare listening socket in a temp CWD."""
 
     def __init__(self, secure=True):
         import contextlib
         import io
         import tempfile
-        import networkservice
+        import client
 
         self.tmp = tempfile.TemporaryDirectory()
         self.cwd = os.getcwd()
@@ -137,7 +137,7 @@ class LocalClient:
         self.output = io.StringIO()
         self.capture = lambda: contextlib.redirect_stdout(self.output)
         with self.capture():
-            self.client = networkservice.Client(*self.listener.getsockname(), secure=secure)
+            self.client = client.Client(*self.listener.getsockname(), secure=secure)
         self.peer, _ = self.listener.accept()
 
     def feed(self, *packets):

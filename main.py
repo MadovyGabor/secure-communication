@@ -1,7 +1,9 @@
 import argparse
 import sys
 
-import networkservice
+import attacker
+import client
+import server
 
 
 def port_number(value: str) -> int:
@@ -23,10 +25,10 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def build_service(args: argparse.Namespace):
     if args.mode == "client":
-        return networkservice.Client(args.host, args.port, args.instance, secure=args.secure)
+        return client.Client(args.host, args.port, args.instance, secure=args.secure)
     if args.mode == "server":
-        return networkservice.Server(args.host, args.port, secure=args.secure)
-    return networkservice.Attacker(args.host, args.port, secure=args.secure)
+        return server.Server(args.host, args.port, secure=args.secure)
+    return attacker.Attacker(args.host, args.port, secure=args.secure)
 
 
 def run(service) -> None:

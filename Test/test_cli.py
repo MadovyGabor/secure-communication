@@ -57,7 +57,7 @@ class TestRun(unittest.TestCase):
 
     def test_build_service_dispatch(self):
         args = main.parse_args(["client", "h", "1", "inst", "--unsecure"])
-        with mock.patch("networkservice.Client") as client:
+        with mock.patch("client.Client") as client:
             main.build_service(args)
         client.assert_called_once_with("h", 1, "inst", secure=False)
 
