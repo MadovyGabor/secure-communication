@@ -1,39 +1,51 @@
+import argparse
 import sys
 
 import networkservice
 
-attacker = None
-service = None
-def main(mode, host, port, instance, secure):
-    if(mode == "client"):
-        service = networkservice.Client(host, port, instance, secure=secure)
-    elif(mode == "server"):
-        service = networkservice.Server(host, port, secure=secure)
-    elif(mode == "attack"):
-        attacker = networkservice.Attacker(host, port, secure=secure)
-        service = attacker.get_service()
-    else:
-        exit()
 
-    service.loop()
+def port_number(value: str) -> int:
+    port = int(value)
+    if not 0 < port < 65536:
+        raise argparse.ArgumentTypeError(f"port must be 1-65535, got {port}")
+    return port
 
-if(len(sys.argv) < 3 + 1):
-    exit()
 
-mode : str = sys.argv[1]
-host : str = sys.argv[2]
-port : int = int(sys.argv[3])
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Secure chat playground (server, client, MITM attacker).")
+    parser.add_argument("mode", choices=["server", "client", "attack"])
+    parser.add_argument("host", help="server: address to listen on; client/attack: address to connect to")
+    parser.add_argument("port", type=port_number, help="server: port to listen on; client/attack: port to connect to")
+    parser.add_argument("instance", nargs="?", default="default", help="client instance name (selects key files)")
+    parser.add_argument("--unsecure", dest="secure", action="store_false", help="disable RSA authentication")
+    return parser.parse_args(argv)
 
-secure = "--unsecure" not in sys.argv
-sys.argv = [arg for arg in sys.argv if arg != "--unsecure"]
 
-instance : str = "default"
-if(mode == "client" and len(sys.argv) >= 4 + 1):
-    instance = sys.argv[4]
+def build_service(args: argparse.Namespace):
+    if args.mode == "client":
+        return networkservice.Client(args.host, args.port, args.instance, secure=args.secure)
+    if args.mode == "server":
+        return networkservice.Server(args.host, args.port, secure=args.secure)
+    return networkservice.Attacker(args.host, args.port, secure=args.secure)
 
-try:
-    main(mode, host, port, instance, secure)
-except KeyboardInterrupt:
-    if(service is not None):
+
+def run(service) -> None:
+    try:
+        service.loop()
+    except KeyboardInterrupt:
         service.shutdown()
-        service = None
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    try:
+        service = build_service(args)
+    except OSError as e:
+        print(f"Error: cannot start {args.mode} on {args.host}:{args.port}: {e}", file=sys.stderr)
+        return 1
+    run(service)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
