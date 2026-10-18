@@ -50,9 +50,8 @@ def process_rsa_auth_packet(message: str, peer_public_key: tuple[int, int]) -> t
 
     return is_valid, text_message
 
-def build_rsa_init_packet(filename = None) -> tuple[str, tuple[int, int]]:
+def load_or_create_keys(filename = None) -> tuple[tuple[int, int], tuple[int, int]]:
 
-    # the initial packet to share this nodes public key.
     # Loads existing keys from JSON, or generates and saves new ones if none exist.
 
     public_key, private_key = None, None
@@ -65,9 +64,15 @@ def build_rsa_init_packet(filename = None) -> tuple[str, tuple[int, int]]:
         if(filename is not None):
             RSALogic.save_keys_to_json(public_key, private_key, filename)
 
+    return public_key, private_key
+
+def build_rsa_init_packet(public_key: tuple[int, int]) -> str:
+
+    # the initial packet to share this nodes public key.
+
     e, n = public_key
 
     packet = protocol.build_rsa_init(e, n)
     print("[RSA Protocol] RSA_INIT packet built successfully. Ready to send.")
 
-    return packet, private_key
+    return packet

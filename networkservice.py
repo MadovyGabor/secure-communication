@@ -86,7 +86,8 @@ class Client(NetworkService):
                     continue
                 # RSA handshake!
                 try:
-                    packet, self.my_rsa_priv = RSA_Main.build_rsa_init_packet(self.instance + "_client_key.json")
+                    my_rsa_pub, self.my_rsa_priv = RSA_Main.load_or_create_keys(self.instance + "_client_key.json")
+                    packet = RSA_Main.build_rsa_init_packet(my_rsa_pub)
                 except ValueError as e:
                     print(f"[Client] Error: {e}")
                     continue
@@ -223,7 +224,7 @@ class Server(NetworkService):
         # RSA handling
         self.client_rsa_keys = {}
         # Load server's keys
-        _, self.my_rsa_priv = RSA_Main.build_rsa_init_packet("server_key.json")
+        self.my_rsa_pub, self.my_rsa_priv = RSA_Main.load_or_create_keys("server_key.json")
 
         print(f"[Server] Started listening on port {port}")
 
@@ -251,7 +252,7 @@ class Server(NetworkService):
             client_pub = RSA_Main.process_rsa_init_packet(message)
             self.client_rsa_keys[sender.port] = client_pub
 
-            packet, _ = RSA_Main.build_rsa_init_packet("server_key.json")
+            packet = RSA_Main.build_rsa_init_packet(self.my_rsa_pub)
             sender.send(packet.encode("utf-8"))
             return
 
