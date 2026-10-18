@@ -1,4 +1,5 @@
 from diffieHellman import DHNetwork
+from diffieHellman import DHLogic
 from RSA import RSA_Main
 from RSA import RSA_Math as RSA_Logic
 from GCM.GCM import aes_gcm_encrypt, aes_gcm_decrypt
@@ -17,17 +18,23 @@ class NetworkService():
     def loop(self):
         pass
 
-    # helper function for decrypting and decoding received data
-    @staticmethod
-    def decrypt_and_decode(encrypted_data, secret):
-        length = int.from_bytes(encrypted_data[:4], 'big')
+    def decrypt_payload(self, encrypted_data, secret):
         packet = encrypted_data[4:]
-
         nonce = packet[:12]
         tag = packet[12:28]
         ciphertext = packet[28:]
+        return aes_gcm_decrypt(nonce, secret, ciphertext, tag)
 
-        decrypted_data = aes_gcm_decrypt(nonce, secret, ciphertext, tag)
+    def encrypt_payload(self, plaintext_bytes, secret):
+        nonce = os.urandom(12)
+        ciphertext, tag = aes_gcm_encrypt(nonce, secret, plaintext_bytes)
+        packet = nonce + tag + ciphertext
+        length = len(packet).to_bytes(4, 'big')
+        return length + packet
+
+    # helper function for decrypting and decoding received data
+    def decrypt_and_decode(self, encrypted_data, secret):
+        decrypted_data = self.decrypt_payload(encrypted_data, secret)
         return decrypted_data.decode("utf-8", errors="ignore")
 
 
@@ -36,9 +43,12 @@ class NetworkService():
         pass
 
 class Client(NetworkService):
-    def __init__(self, host : str, port : int, instance : str = "default", attack_send_handler = None, attack_recv_handler = None):
+    def __init__(self, host : str, port : int, instance : str = "default", attack_send_handler = None, attack_recv_handler = None, secure=False, attack_toggle_handler=None, spoof_toggle_handler=None):
         super().__init__(host, port)
+        self.secure = secure
         self.instance = instance
+        self.attack_toggle_handler = attack_toggle_handler
+        self.spoof_toggle_handler = spoof_toggle_handler
         self.socket.connect((self.host, self.port))
         self.client_socket = networkstack.ClientSocket(self.socket)
 
@@ -61,8 +71,18 @@ class Client(NetworkService):
         self.network_thread.start()
 
     def loop(self):
+        print("\n[Client] Napište 'help' pro seznam příkazů.")
         while self.network_thread.is_alive():
             input_ = input()
+
+            if input_ == "help":
+                print("\n[Client] Dostupné příkazy:")
+                print("  rsa    - Započne výměnu RSA veřejných klíčů se serverem (autentizace).")
+                print("  dh     - Zahájí Diffie-Hellman výměnu klíčů pro šifrování (AES-GCM).")
+                print("  exit   - Ukončí připojení a vypne klienta.")
+                print("  help   - Zobrazí tuto nápovědu.")
+                print("  <text> - Jakýkoliv jiný text bude odeslán jako zpráva do chatu.\n")
+                continue
 
             if input_ == "exit":
                 self.lock.acquire()
@@ -70,23 +90,37 @@ class Client(NetworkService):
                 self.lock.release()
                 return
 
+            elif input_ == "attack":
+                if self.attack_toggle_handler:
+                    self.attack_toggle_handler()
+
+            elif input_ == "spoof":
+                if self.spoof_toggle_handler:
+                    self.spoof_toggle_handler()
+
             elif input_ == "rsa":
+                if not self.secure:
+                    print("[Client] Error: Insecure mode. Run 'dh' directly.")
+                    continue
                 # RSA handshake!
                 packet, self.my_rsa_priv = RSA_Main.build_rsa_init_packet(self.instance + "_client_key.json")
                 if self.network_thread.is_alive():
                     self.send(packet.encode("utf-8"))
 
             elif input_ == "dh":
-                if not self.my_rsa_priv or not self.peer_rsa_pub:
-                    print("Error: You must run 'rsa' to exchange keys first!")
+                if self.secure and (not self.my_rsa_priv or not self.peer_rsa_pub):
+                    print("[Client] Error: You must run 'rsa' to exchange keys first!")
                     continue
 
                 dh_packet, self.p, self.g, self.private_key = DHNetwork.build_init_packet()
 
-                auth_packet = RSA_Main.build_rsa_auth_packet(dh_packet, self.my_rsa_priv)
-
-                if self.network_thread.is_alive():
-                    self.send(auth_packet.encode("utf-8"))
+                if self.secure:
+                    auth_packet = RSA_Main.build_rsa_auth_packet(dh_packet, self.my_rsa_priv)
+                    if self.network_thread.is_alive():
+                        self.send(auth_packet.encode("utf-8"))
+                else:
+                    if self.network_thread.is_alive():
+                        self.send(dh_packet.encode("utf-8"))
 
             else:
                 if(self.network_thread.is_alive()):
@@ -95,7 +129,7 @@ class Client(NetworkService):
                     if(self.aes_session_key is not None):
                         self.send_encrypted_to_server(encoded_message, self.aes_session_key)
                     else:
-                        print("sending unencrypted message")
+                        print("[Client] Sending unencrypted message...")
                         self.send(encoded_message)  
     
     def network_loop(self):
@@ -105,7 +139,7 @@ class Client(NetworkService):
             self.lock.release()
             if(not connected):
                 self.client_socket.shutdown()
-                print("server shut down")
+                print("[Client] Server connection lost.")
                 return
 
             time.sleep(0.1)
@@ -117,13 +151,8 @@ class Client(NetworkService):
             self.attack_send_handler(self.client_socket, self.receive_handler, data)
 
     def send_encrypted_to_server(self, data, aes_session_key):
-        nonce = os.urandom(12)
-        ciphertext, tag = aes_gcm_encrypt(nonce, aes_session_key, data)
-
-        packet = nonce + tag + ciphertext
-        length = len(packet).to_bytes(4, 'big')
-
-        self.send(length + packet)
+        packet = self.encrypt_payload(data, aes_session_key)
+        self.send(packet)
 
     def recv(self, sender_socket, data : bytes):
         if(self.attack_recv_handler is None):
@@ -142,41 +171,44 @@ class Client(NetworkService):
             received_public = RSA_Main.process_rsa_init_packet(message)
             if(saved_public is not None):
                 if(saved_public != received_public):
-                    print("Received and saved server public keys do not match! An attacker might be involved....")
+                    print("[Security] WARNING: Received and saved server public keys do not match! An attacker might be involved...")
                     return
             
             self.peer_rsa_pub = received_public
             RSA_Logic.save_keys_to_json(self.peer_rsa_pub, tuple([None, None]), self.instance + "_server_key.json")
-            print("SUCCESS: Exchanged RSA Public Keys with the Server!")
+            print("[RSA Protocol] SUCCESS: Exchanged RSA Public Keys with the Server!")
             return
 
         if message is not None and message.startswith("RSA_AUTH:"):
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, self.peer_rsa_pub)
             if not is_valid:
-                print("HACKER DETECTED! Dropping packet.")
+                print("[Security] HACKER DETECTED! Signature invalid. Dropping packet.")
                 return
 
             message = inner_message
 
         if message is not None and message.startswith("DH_ACCEPT:"):
             self.raw_dh_secret, self.aes_session_key = DHNetwork.process_accept_packet(message, self.p, self.private_key)
-            print(f"raw DH secret: {str(self.raw_dh_secret)[:15]}...")
+            print(f"[DH Protocol] Raw DH Secret: {str(self.raw_dh_secret)[:15]}...")
+            print(f"[DH Protocol] AES Session Key Derived: {self.aes_session_key.hex()[:15]}...")
             return
 
         # received encrypted message
         if(self.aes_session_key is not None):
             decrypted_message = self.decrypt_and_decode(data, self.aes_session_key)
-            print(decrypted_message)
+            print(f"[Message from Server]: {decrypted_message}")
         else:
-            print("Received unencrypted message!")
-            print(message)
+            print("[Warning] Received unencrypted message!")
+            print(f"[Message from Server]: {message}")
 
     def shutdown(self):
         self.client_socket.shutdown()
 
 class Server(NetworkService):
-    def __init__(self, host : str, port : int):
+    def __init__(self, host : str, port : int, secure=False):
         super().__init__(host, port)
+        self.secure = secure
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((host, port))
         self.socket.listen(1)
         
@@ -191,7 +223,7 @@ class Server(NetworkService):
         # Load server's keys
         _, self.my_rsa_priv = RSA_Main.build_rsa_init_packet("server_key.json")
 
-        print("server started")
+        print(f"[Server] Started listening on port {port}")
 
     def loop(self):
         while True:
@@ -216,12 +248,12 @@ class Server(NetworkService):
         if message is not None and message.startswith("RSA_AUTH:"):
             client_pub = self.client_rsa_keys.get(sender.port)
             if not client_pub:
-                print("Error: Client has not exchanged RSA keys yet.")
+                print("[Server] Error: Client has not exchanged RSA keys yet.")
                 return
 
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, client_pub)
             if not is_valid:
-                print("HACKER DETECTED! Dropping packet.")
+                print("[Security] HACKER DETECTED! Signature invalid. Dropping packet.")
                 return
 
             # If authentic
@@ -233,8 +265,25 @@ class Server(NetworkService):
                 auth_reply = RSA_Main.build_rsa_auth_packet(dh_reply_packet, self.my_rsa_priv)
                 sender.send(auth_reply.encode("utf-8"))
 
-                print(f"raw DH secret: {str(raw_dh_secret)[:15]}...")
+                print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
+                print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
                 return
+
+        # 2.5 Unauthenticated Client Messages
+        if message is not None and message.startswith("DH_INIT:"):
+            if self.secure:
+                print("[Security] HACKER DETECTED! Dropping unauthenticated packet.")
+                return
+
+            dh_reply_packet, raw_dh_secret, aes_session_key = DHNetwork.process_init_packet(message)
+            self.client_raw_dh_secrets[sender.port] = raw_dh_secret
+            self.client_aes_keys[sender.port] = aes_session_key
+
+            sender.send(dh_reply_packet.encode("utf-8"))
+
+            print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
+            print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
+            return
         
         # 3. encrypted client messages
         if(sender.port not in self.client_aes_keys):
@@ -244,8 +293,9 @@ class Server(NetworkService):
         # decrypt incoming správu
         try:
             plaintext = self.decrypt_and_decode(data, self.client_aes_keys[sender.port])
+            print(f"[Message from Client {sender.port}]: {plaintext}")
         except Exception as e:
-            print("Decryption failed:", e)
+            print(f"[Security] Decryption failed: {e}")
             return
         
         out = "{}: {}".format(sender.port, plaintext).encode("utf-8")
@@ -269,111 +319,242 @@ class Server(NetworkService):
         if len(secret) not in (16, 24, 32):
             raise ValueError("Invalid AES key length")
 
-        nonce = os.urandom(12)
-
-        ciphertext, tag = aes_gcm_encrypt(nonce, secret, data)
-
-        packet = nonce + tag + ciphertext
-        length = len(packet).to_bytes(4, 'big')
-
-        client_socket.send(length + packet)
+        packet = self.encrypt_payload(data, secret)
+        client_socket.send(packet)
     
     def shutdown(self):
         self.server_socket.shutdown()
 
-class Attacker():
-    def send_handler(self, client_socket, client_receive_handler, data):
-        try:
-            message = data.decode("utf-8")
-        except:
-            message = None
-
-        # klient si snaží se serverem vyměnit RSA klíč. podstrčím jim vlastní ;)
-        if message is not None and message.startswith("RSA_INIT:"):
-            self.client_public = RSA_Main.process_rsa_init_packet(message)
-            attacker_packet, self.attacker_rsa_priv = RSA_Main.build_rsa_init_packet()
-            attacker_packet = attacker_packet.encode("utf-8")
-            
-            # poslat klientovi
-            client_receive_handler(client_socket, attacker_packet)
-            
-            # poslat serveru
-            client_socket.send(attacker_packet)
-            return
-
-        if message is not None and message.startswith("RSA_AUTH:"):
-            _, inner_message = RSA_Main.process_rsa_auth_packet(message, self.client_public)
-            if inner_message.startswith("DH_INIT:"):
-                # vytvořit shared secret mezi útočníkem a klientem
-                dh_attacker_reply_packet, _, self.attacker_client_shared_secret = DHNetwork.process_init_packet(inner_message)
-                attacker_client_auth_reply = RSA_Main.build_rsa_auth_packet(dh_attacker_reply_packet, self.attacker_rsa_priv)
-                client_receive_handler(client_socket, attacker_client_auth_reply.encode("utf-8"))
-
-                # vytvořit shared secret mezi úročníkem a serverem
-                attacker_server_dh_packet, self.attacker_server_p, self.attacker_server_g, self.attacker_server_private_key = DHNetwork.build_init_packet()
-                attacker_server_auth_packet = RSA_Main.build_rsa_auth_packet(attacker_server_dh_packet, self.attacker_rsa_priv)
-                client_socket.send(attacker_server_auth_packet.encode("utf-8"))
-            
-            return
-
-        if(self.attacker_client_shared_secret is not None):
-            # šifrovaná komunikace
-            decrypted_message = NetworkService.decrypt_and_decode(data, self.attacker_client_shared_secret)
-            print("attacker sees from client: ", decrypted_message)
-            
-            # zašifrovat shared secretem mezi útočníkem a sevrerem a poslat serveru
-            nonce = os.urandom(12)
-            print(self.attacker_server_shared_secret)
-            ciphertext, tag = aes_gcm_encrypt(nonce, self.attacker_server_shared_secret, decrypted_message.encode("utf-8"))
-
-            packet = nonce + tag + ciphertext
-            length = len(packet).to_bytes(4, 'big')
-
-            # přeposlat serveru
-            client_socket.send(length + packet)
-        else:
-            client_socket.send(data)
-
-    def recv_handler(self, client_socket, client_receive_handler, data):
-        try:
-            message = data.decode("utf-8")
-        except:
-            message = None
-
-        # server odpovídá klientovi (útočníkovi) na jeho RSA_INIT dotaz svým veřejným klíčem
-        if message is not None and message.startswith("RSA_INIT:"):
-            self.server_public = RSA_Main.process_rsa_init_packet(message)
-            return
+class Attacker(NetworkService):
+    def __init__(self, host, port, secure=False):
+        # Target server
+        self.target_host = host
+        self.target_port = port
         
-        if message is not None and message.startswith("RSA_AUTH:"):
-            _, inner_message = RSA_Main.process_rsa_auth_packet(message, self.server_public)
-            message = inner_message
-
-        if message is not None and message.startswith("DH_ACCEPT:"):
-            _, self.attacker_server_shared_secret = DHNetwork.process_accept_packet(message, self.attacker_server_p, self.attacker_server_private_key)
-            print(f"mam secret mezi utocnikem a serverem {self.attacker_server_shared_secret}")
-            return
+        # We listen on target_port + 1
+        self.proxy_port = port + 1
+        super().__init__('127.0.0.1', self.proxy_port)
         
-        if(self.attacker_server_shared_secret is not None):
-            # šifrovaná komunikace
-            decrypted_message = NetworkService.decrypt_and_decode(data, self.attacker_server_shared_secret)
-            print("attacker sees from server: ", decrypted_message)
-            
-            nonce = os.urandom(12)
-            ciphertext, tag = aes_gcm_encrypt(nonce, self.attacker_client_shared_secret, decrypted_message.encode("utf-8"))
-
-            packet = nonce + tag + ciphertext
-            length = len(packet).to_bytes(4, 'big')
-
-            # přeposlat klientovi
-            client_receive_handler(client_socket, length + packet)
-        else:
-            client_receive_handler(client_socket, data)
-    
-    def __init__(self, host : str, port : int, instance : str):
-        self.client = Client(host, port, instance, self.send_handler, self.recv_handler)
-        self.attacker_server_shared_secret = None
-        self.attacker_client_shared_secret = None
+        self.mitm_active = False
+        self.spoof_active = False
+        self.tamper_text = None
+        self.secure = secure
+        
+        # Map: RealClientPort -> { 'server_socket': ClientSocket, 'client_socket': ClientSocket }
+        self.relays = {}
+        
+        # Setup proxy server socket
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind(('127.0.0.1', self.proxy_port))
+        self.socket.listen(5)
+        self.server_stack = networkstack.ServerSocket(self.socket)
+        
+        print(f"\n[MITM] Attacker Proxy started on 127.0.0.1:{self.proxy_port}")
+        print(f"[MITM] Relaying traffic to {host}:{port}")
+        print("[MITM] Napište 'help' pro seznam příkazů.\n")
 
     def get_service(self):
-        return self.client
+        return self
+
+    def loop(self):
+        # Start proxy processing in a background thread
+        threading.Thread(target=self.proxy_thread, daemon=True).start()
+        
+        # Main thread handles CLI commands
+        while True:
+            try:
+                cmd = input()
+                if cmd == "help":
+                    print("\n[MITM] Dostupné příkazy:")
+                    print("  attack        - Zapne/vypne aktivní MITM útok (podvržení DH klíčů).")
+                    print("  tamper <text> - Nahradí obsah další zachycené dešifrované zprávy zadaným textem.")
+                    print("  spoof         - Zapne/vypne generování falešných zpráv oběma stranám.")
+                    print("  exit          - Ukončí proxy server a odpojí klienty.")
+                    print("  help          - Zobrazí tuto nápovědu.\n")
+                elif cmd == "attack":
+                    self.mitm_active = not self.mitm_active
+                    print(f"MITM Attack Mode: {'ENABLED' if self.mitm_active else 'DISABLED'}")
+                elif cmd == "spoof":
+                    self.spoof_active = not self.spoof_active
+                    print(f"Spoofing Mode: {'ENABLED' if self.spoof_active else 'DISABLED'}")
+                elif cmd.startswith("tamper "):
+                    self.tamper_text = cmd[7:]
+                    print(f"Next intercepted message will be replaced with: '{self.tamper_text}'")
+                elif cmd == "exit":
+                    print("Shutting down attacker proxy...")
+                    break
+            except EOFError:
+                break
+
+    def proxy_thread(self):
+        while True:
+            try:
+                # 1. Accept and process data from Clients connecting to the proxy
+                self.server_stack.process(self.receive_from_client)
+                
+                # 2. Process data coming from the Real Server back to the proxy
+                disconnected_ports = []
+                for port, relay in self.relays.items():
+                    if not relay['server_socket'].process(self.receive_from_server, (relay['client_socket'],)):
+                        disconnected_ports.append(port)
+                
+                for port in disconnected_ports:
+                    print(f"[MITM] Relay for client port {port} disconnected.")
+                    self.relays[port]['server_socket'].shutdown()
+                    del self.relays[port]
+                    
+            except Exception:
+                pass
+            time.sleep(0.01)
+
+    def receive_from_client(self, client_socket, data):
+        # Data from REAL CLIENT -> PROXY
+        port = client_socket.port
+        if port not in self.relays:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.connect((self.target_host, self.target_port))
+                server_sock = networkstack.ClientSocket(s)
+                self.relays[port] = {
+                    'client_socket': client_socket,
+                    'server_socket': server_sock,
+                    'mitm_state': {
+                        'k_client': None,
+                        'k_server': None,
+                        'p': None,
+                        'attacker_priv': None,
+                        'attacker_pub': None
+                    }
+                }
+                print(f"[MITM] New relay established for client {port}")
+            except Exception as e:
+                print(f"[MITM] Failed to connect to target server: {e}")
+                return
+
+        tampered = self.intercept(data, "CLIENT -> SERVER", port)
+        self.relays[port]['server_socket'].send(tampered)
+
+    def receive_from_server(self, real_client_socket, server_socket, data):
+        # From REAL SERVER -> PROXY
+        port = real_client_socket.port
+        tampered = self.intercept(data, "SERVER -> CLIENT", port)
+        real_client_socket.send(tampered)
+
+    def intercept(self, data, direction, port):
+        # Logging raw data
+        hex_data = data.hex()
+        print(f"[MITM INTERCEPT {direction}] Data: {hex_data[:30]}{'...' if len(hex_data) > 30 else ''}")
+        
+        state = self.relays[port]['mitm_state']
+
+        if self.spoof_active:
+            if "CLIENT -> SERVER" in direction:
+                print("[MITM] Spoofing message to server.")
+                if state['k_server']:
+                    return self.encrypt_payload(b"i totally sent this lol", state['k_server'])
+                return b"i totally sent this lol"
+            else:
+                print("[MITM] Spoofing message to client.")
+                if state['k_client']:
+                    return self.encrypt_payload(b"you totally received this", state['k_client'])
+                return b"you totally received this"
+
+        # 1. Plaintext Handshake Tampering
+        if self.mitm_active:
+            try:
+                msg = data.decode("utf-8")
+                
+                if "DH_INIT:" in msg and "CLIENT -> SERVER" in direction:
+                    print("[MITM] Intercepted DH_INIT! Deriving keys and injecting MITM public key...")
+                    parts = msg.split("DH_INIT:")
+                    dh_string = parts[1]
+                    
+                    signature_part = ""
+                    if "|" in dh_string:
+                        dh_core, signature_part = dh_string.split("|", 1)
+                        signature_part = "|" + signature_part
+                    else:
+                        dh_core = dh_string
+                        
+                    dh_parts = dh_core.split(":")
+                    if len(dh_parts) >= 3:
+                        p = int(dh_parts[0])
+                        g = int(dh_parts[1])
+                        client_pub = int(dh_parts[2])
+                        
+                        state['p'] = p
+                        state['attacker_priv'] = DHLogic.generate_private_key(p)
+                        state['attacker_pub'] = DHLogic.generate_public_key(state['attacker_priv'], g, p)
+                        
+                        raw_k_client = DHLogic.generate_shared_secret(state['attacker_priv'], client_pub, p)
+                        state['k_client'] = DHLogic.derive_aes_key(raw_k_client)
+                        
+                        dh_parts[2] = str(state['attacker_pub'])
+                        new_dh_core = ":".join(dh_parts)
+                        parts[1] = new_dh_core + signature_part
+                        fake_msg = "DH_INIT:".join(parts)
+                        return fake_msg.encode("utf-8")
+
+                elif "DH_ACCEPT:" in msg and "SERVER -> CLIENT" in direction:
+                    print("[MITM] Intercepted DH_ACCEPT! Deriving keys and injecting MITM public key...")
+                    parts = msg.split("DH_ACCEPT:")
+                    dh_string = parts[1]
+                    
+                    signature_part = ""
+                    if "|" in dh_string:
+                        dh_core, signature_part = dh_string.split("|", 1)
+                        signature_part = "|" + signature_part
+                    else:
+                        dh_core = dh_string
+                        
+                    dh_parts = dh_core.split(":")
+                    if len(dh_parts) >= 1 and state['p'] is not None:
+                        server_pub = int(dh_parts[0])
+                        
+                        raw_k_server = DHLogic.generate_shared_secret(state['attacker_priv'], server_pub, state['p'])
+                        state['k_server'] = DHLogic.derive_aes_key(raw_k_server)
+                        
+                        dh_parts[0] = str(state['attacker_pub'])
+                        new_dh_core = ":".join(dh_parts)
+                        parts[1] = new_dh_core + signature_part
+                        fake_msg = "DH_ACCEPT:".join(parts)
+                        
+                        print(f"[MITM] K_client derived: {state['k_client'].hex()[:15]}...")
+                        print(f"[MITM] K_server derived: {state['k_server'].hex()[:15]}...")
+                        return fake_msg.encode("utf-8")
+                        
+            except Exception:
+                pass
+
+        # 2. Encrypted Message Translation
+        if self.mitm_active and state['k_client'] and state['k_server']:
+            try:
+                if "CLIENT -> SERVER" in direction:
+                    plaintext = self.decrypt_payload(data, state['k_client'])
+                    print(f"[MITM] Extracted Plaintext: {plaintext.decode('utf-8', errors='ignore')}")
+                    
+                    if self.tamper_text:
+                        print(f"[MITM] TAMPERING MESSAGE! Replacing with '{self.tamper_text}'")
+                        plaintext = self.tamper_text.encode("utf-8")
+                        self.tamper_text = None
+                        
+                    return self.encrypt_payload(plaintext, state['k_server'])
+                elif "SERVER -> CLIENT" in direction:
+                    plaintext = self.decrypt_payload(data, state['k_server'])
+                    print(f"[MITM] Extracted Plaintext: {plaintext.decode('utf-8', errors='ignore')}")
+                    
+                    if self.tamper_text:
+                        print(f"[MITM] TAMPERING MESSAGE! Replacing with '{self.tamper_text}'")
+                        plaintext = self.tamper_text.encode("utf-8")
+                        self.tamper_text = None
+                        
+                    return self.encrypt_payload(plaintext, state['k_client'])
+            except Exception:
+                pass
+
+        return data
+
+    def shutdown(self):
+        for port in self.relays:
+            self.relays[port]['server_socket'].shutdown()
+        self.server_stack.shutdown()
