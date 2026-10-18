@@ -1,0 +1,58 @@
+# Demo: docker compose up --build
+#
+# Each service takes the same arguments as `python main.py` (see README):
+#   server   listens on 0.0.0.0:8000 inside the private network
+#   attacker relays to server:8000 and listens on 127.0.0.1:8001 of its own network namespace
+#   client   shares the attacker's network namespace, so it reaches the server as "server:8000"
+#            and the attacker proxy as "127.0.0.1:8001"
+#
+# Interact with a service:   docker attach secure-chat-client-1   (detach: Ctrl+P, Ctrl+Q)
+# MITM demo client:          docker compose run --rm client client 127.0.0.1 8001 victim
+# Unsecure mode:             append "--unsecure" to the server, attacker and client commands
+
+name: secure-chat
+
+services:
+  server:
+    build: .
+    command: ["server", "0.0.0.0", "8000"]
+    networks: [chat]
+    volumes:
+      - server-keys:/data
+    healthcheck:
+      # listening on port 8000 (0x1F40); reads /proc instead of connecting, which would show up as a chat client
+      test: ["CMD-SHELL", "grep -q ':1F40 00000000:0000 0A' /proc/net/tcp"]
+      interval: 2s
+      retries: 15
+
+  attacker:
+    build: .
+    command: ["attack", "server", "8000"]
+    stdin_open: true
+    tty: true
+    networks: [chat]
+    depends_on:
+      server:
+        condition: service_healthy
+
+  client:
+    build: .
+    command: ["client", "server", "8000", "docker"]
+    stdin_open: true
+    tty: true
+    network_mode: "service:attacker"
+    depends_on:
+      server:
+        condition: service_healthy
+      attacker:
+        condition: service_started
+    volumes:
+      - client-keys:/data
+
+networks:
+  chat:
+    internal: true
+
+volumes:
+  server-keys:
+  client-keys:
