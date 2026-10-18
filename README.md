@@ -8,6 +8,13 @@
 - obsahuje integrovaného proxy útočníka pro demonstraci Man-in-the-Middle (MITM) útoků
 
 ## Návod
+### Instalace
+- Python 3.10+
+- ``pip install -r requirements.txt``
+
+### Testy
+- z kořenového adresáře repozitáře: ``python -m unittest discover -s Test -t .``
+
 ### Spuštění a připojení
 - server
     - ``python main.py server [adresa ze které bude přijímat přopojení] [port]`` (př. ``python main.py server 127.0.0.1 8000``)
