@@ -5,7 +5,7 @@ from . import RSA_Math as RSALogic
 
 def process_rsa_init_packet(message: str) -> tuple[int, int]:
 
-    # Examines the recieved the RSAbpacket
+    # Parses the received RSA_INIT packet
 
     print("[RSA Protocol] Received RSA_INIT packet. Parsing parameters...")
 
