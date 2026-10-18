@@ -1,5 +1,6 @@
 """Helpers for end-to-end tests that drive main.py in subprocesses."""
 import os
+import random
 import socket
 import subprocess
 import sys
@@ -11,12 +12,16 @@ MAIN = os.path.join(REPO_ROOT, "main.py")
 TIMEOUT = 30
 
 
+# Below the OS ephemeral ranges (Linux 32768+, Windows 49152+). A port the OS hands out with
+# bind(0) is ephemeral: an outgoing connection elsewhere on the machine can take it between this
+# check and the moment the server or attacker subprocess binds it (seen as WinError 10013).
+TEST_PORTS = range(20000, 32000, 2)
+
+
 def free_port_pair():
     """Return a port p such that p and p + 1 are both free on 127.0.0.1."""
-    for _ in range(50):
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            port = s.getsockname()[1]
+    for _ in range(100):
+        port = random.choice(TEST_PORTS)
         try:
             with socket.socket() as s1, socket.socket() as s2:
                 s1.bind(("127.0.0.1", port))
