@@ -249,20 +249,29 @@ file as it was just before the fix commit. Test names are classes and methods in
 - The MITM proxy always listens on `127.0.0.1`.
 - Key files depend on the working directory: starting from another directory creates a new identity.
 
-## Contributions
+## Team Roles and My Post-Project Refactoring
 
-Original project: four-person university team project.
+This project started as a four-person university assignment where every team member built a specific part of the system.
 
-My contributions (Gabriel Madový), from `git log --author="Gabriel Madový"`:
+**Original Team Breakdown:**
+* **Gabriel Madový (me):** Diffie-Hellman key exchange and HKDF key derivation (`diffieHellman/`).
+* **Petr Věříš:** TCP network stack, length-prefixed framing, and the client, server, and MITM proxy architecture (`networkstack.py`, `networkservice.py`).
+* **Donát Szabó:** RSA key generation, signing, verification, and JSON key storage (`RSA/`).
+* **Oliver Synak:** Symmetric encryption using a custom AES-GCM implementation (`GCM/`).
 
-- Refactor: `c82124f`, `2976803`, `9fdd3d5`, `a2b06a2`, `7bf825b`
-- CLI: `7be2038`
-- Bug fixes: `b0c64b2`, `7edebd5`, `db3c014`, `cb6cefd`, `ceabd7c`
-- Tests: `7bb4ce5`, `a36946d`, `03c5fa7`, `4370052`, `dabbfc0`
-- CI: `a5b5efd`
-- Docs: `5508034`, `d7bbcf6`, `6e398ef`, `a2d62c4`, `5f5ff7b`
-- Build, Docker and cleanup: `99c17c6`, `cc9ca6e`, `c06597a`, `5845077`, `08518a4`, `ff3dae0`
+**My Standalone Improvements and Bug Fixes:**
+After our team finished the university course, I took the codebase to clean it up and turn it into a reliable project. With the help of AI tools, I reviewed the entire repository, refactored the structure, and fixed 21 bugs across the networking and cryptography layers.
 
-Other team members: see repository history.
+In the original version, the server used 100% CPU while idle because `select` checked every client socket as writable on each loop. A single malformed packet or a connection reset from a client crashed the server or stopped it from accepting new connections. On the client side, an error during packet processing left a thread lock acquired, which caused the `exit` command to hang. Disconnecting clients also left stale keys on the server and open relay connections on the MITM proxy.
 
-TO CONFIRM: team member roles
+I also fixed several critical security flaws in the protocol logic. Originally, the client accepted unsigned `DH_ACCEPT` packets even in secure mode, and it sent chat messages in plaintext if the user typed before running the key exchange. The Diffie-Hellman handler also accepted any `p` and `g` parameters sent over the network, which allowed an attacker to force a weak group. I updated the code to enforce valid signatures, block unencrypted messages in secure mode, and strictly check the RFC 3526 MODP Group 14 parameters.
+
+To make sure everything works properly, I built a test suite of 70 unit and end-to-end tests that run all four demo scenarios automatically. I also added a GitHub Actions CI pipeline and created the Docker and Docker Compose setup so anyone can run the server, client, and MITM proxy in isolated containers without manual configuration.
+
+**My commit history on `main` (`git log --author="Gabriel Madový"`):**
+* **Refactoring and structure:** `c82124f`, `2976803`, `9fdd3d5`, `a2b06a2`, `7bf825b`
+* **CLI improvements:** `7be2038`
+* **Network and security bug fixes:** `b0c64b2`, `7edebd5`, `db3c014`, `cb6cefd`, `ceabd7c`
+* **Unit and end-to-end tests:** `7bb4ce5`, `a36946d`, `03c5fa7`, `4370052`, `dabbfc0`
+* **CI and Docker setup:** `a5b5efd`, `99c17c6`, `cc9ca6e`, `c06597a`, `5845077`, `08518a4`, `ff3dae0`
+* **Documentation:** `5508034`, `d7bbcf6`, `6e398ef`, `a2d62c4`, `5f5ff7b`
