@@ -146,7 +146,7 @@ class Client(NetworkService):
                 if self.client_socket.socket is None:
                     return
                 try:
-                    connected = self.client_socket.process(self.recv)
+                    connected = self.client_socket.process(self.recv, timeout=0.1)
                 except OSError:
                     connected = False
             if(not connected):
@@ -154,7 +154,7 @@ class Client(NetworkService):
                 print("[Client] Server connection lost.")
                 return
 
-            time.sleep(0.1)
+            time.sleep(0.01) # let the input thread take the lock
 
     def send(self, data):
         if(self.attack_send_handler is None):
@@ -442,12 +442,12 @@ class Attacker(NetworkService):
 
     def process_once(self):
         # 1. Accept and process data from Clients connecting to the proxy
-        self.server_stack.process(self.receive_from_client)
+        self.server_stack.process(self.receive_from_client, timeout=0)
 
         # 2. Process data coming from the Real Server back to the proxy
         disconnected_ports = []
         for port, relay in self.relays.items():
-            if not relay['server_socket'].process(self.receive_from_server, (relay['client_socket'],)):
+            if not relay['server_socket'].process(self.receive_from_server, (relay['client_socket'],), timeout=0):
                 disconnected_ports.append(port)
 
         for port in disconnected_ports:

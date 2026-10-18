@@ -27,7 +27,7 @@ class ClientSocket():
             self.port = self.socket.getpeername()[1]
 
     def send(self, data, handler = None, handler_args = ()):
-        if(len(data) > 2**(4 * 8)):
+        if(len(data) >= 2**(4 * 8)):
             print("Data too big")
             return False
         elif(len(data) == 0):
@@ -43,10 +43,11 @@ class ClientSocket():
 
         return True
 
-    # blocking!
-    def process(self, recv_handler, recv_handler_args = ()):
+    # blocks until the socket is readable, queued data can be written, or timeout (seconds)
+    def process(self, recv_handler, recv_handler_args = (), timeout = 60):
         result = True
-        ready_to_read, ready_to_write, in_error = select.select([self.socket], [self.socket], [self.socket], 60)
+        to_write = [self.socket] if self.send_queue else []
+        ready_to_read, ready_to_write, in_error = select.select([self.socket], to_write, [self.socket], timeout)
         if(len(ready_to_read) != 0):
             result = self.process_reading(recv_handler, recv_handler_args)
         if(len(ready_to_write) != 0):
@@ -115,17 +116,18 @@ class ServerSocket():
         self.clients = {}
         self.on_disconnect = on_disconnect # called with the client's port
 
-    # blocking
-    def process(self, recv_handler, recv_handler_args = ()):
+    # blocks until a socket is readable, queued data can be written, or timeout (seconds)
+    def process(self, recv_handler, recv_handler_args = (), timeout = 60):
         sockets_to_read = [self.server_socket]
         sockets_to_write = []
         socket_ports = {}
         for port, client in self.clients.items():
             socket_ports[client.socket] = port
             sockets_to_read.append(client.socket)
-            sockets_to_write.append(client.socket)
+            if(client.send_queue): # only wait for writability when there is something to send
+                sockets_to_write.append(client.socket)
 
-        ready_to_read, ready_to_write, in_error = select.select(sockets_to_read, sockets_to_write, [], 60)
+        ready_to_read, ready_to_write, in_error = select.select(sockets_to_read, sockets_to_write, [], timeout)
 
         # a socket error on one client (e.g. connection reset) disconnects only that client
         disconnected = set()
@@ -142,7 +144,7 @@ class ServerSocket():
             if(not connected):
                 disconnected.add(port)
 
-        for sock in sockets_to_write:
+        for sock in ready_to_write:
             port = socket_ports[sock]
             if(port in disconnected):
                 continue

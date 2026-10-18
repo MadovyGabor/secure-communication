@@ -1,5 +1,6 @@
 import socket
 import struct
+import time
 import unittest
 
 import networkstack
@@ -71,6 +72,22 @@ class TestClientSocketFraming(unittest.TestCase):
         self.assertEqual(self.peer.recv(64), self.frame(b"payload"))
         self.assertEqual(done, [self.client])
 
+    def test_idle_process_blocks_until_timeout(self):
+        start = time.monotonic()
+        self.assertTrue(self.client.process(self.handler, timeout=0.3))
+        self.assertGreaterEqual(time.monotonic() - start, 0.25, "select returned immediately: busy loop")
+
+    def test_process_writes_queued_data(self):
+        self.client.send(b"queued")
+        self.client.process(self.handler, timeout=1)
+        self.assertEqual(self.peer.recv(64), self.frame(b"queued"))
+
+    def test_send_rejects_oversized_payload(self):
+        class Huge:
+            def __len__(self):
+                return 2 ** 32
+        self.assertFalse(self.client.send(Huge()))
+
     def test_send_empty_is_noop(self):
         self.assertTrue(self.client.send(b""))
         self.assertEqual(self.client.send_queue, [])
@@ -119,6 +136,23 @@ class TestServerSocket(unittest.TestCase):
 
         peer = self.connect()
         self.assertIn(peer.getsockname()[1], self.server.clients)
+
+    def test_idle_process_blocks_until_timeout(self):
+        self.connect()
+        self.server.process(lambda *args: None)  # flush the welcome message
+        start = time.monotonic()
+        self.server.process(lambda *args: None, timeout=0.3)
+        self.assertGreaterEqual(time.monotonic() - start, 0.25, "select returned immediately: busy loop")
+
+    def test_queued_message_is_written(self):
+        peer = self.connect()
+        self.server.process(lambda *args: None)
+        peer.settimeout(5)
+        peer.recv(64)  # welcome
+        (client,) = self.server.clients.values()
+        client.send(b"ping")
+        self.server.process(lambda *args: None, timeout=1)
+        self.assertEqual(peer.recv(64), len(b"ping").to_bytes(4, "big") + b"ping")
 
     def test_shutdown_closes_all_clients(self):
         peers = [self.connect(), self.connect()]
