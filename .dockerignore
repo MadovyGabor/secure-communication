@@ -1,0 +1,12 @@
+# Never send key material or local state to the Docker daemon
+*.json
+*.pem
+*.key
+__pycache__/
+*.pyc
+.git/
+.github/
+.idea/
+*.pdf
+ISSUES.md
+PLAN.md
