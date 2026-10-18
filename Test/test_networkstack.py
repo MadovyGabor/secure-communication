@@ -75,5 +75,52 @@ class TestClientSocketFraming(unittest.TestCase):
         self.assertEqual(self.client.send_queue, [])
 
 
+class TestServerSocket(unittest.TestCase):
+
+    def setUp(self):
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(5)
+        self.address = listener.getsockname()
+        self.server = networkstack.ServerSocket(listener)
+        self.peers = []
+
+    def tearDown(self):
+        for peer in self.peers:
+            peer.close()
+        self.server.server_socket.close()
+
+    def connect(self):
+        peer = socket.create_connection(self.address)
+        self.peers.append(peer)
+        self.server.process(lambda *args: None)
+        return peer
+
+    def test_accepts_and_greets_clients(self):
+        peer = self.connect()
+        self.assertEqual(list(self.server.clients), [peer.getsockname()[1]])
+        self.server.process(lambda *args: None)  # flush the welcome message
+        peer.settimeout(5)
+        self.assertEqual(peer.recv(64)[4:], b"welcome to the server")
+
+    def test_shutdown_closes_all_clients(self):
+        peers = [self.connect(), self.connect()]
+        clients = list(self.server.clients.values())
+        self.assertEqual(len(clients), 2)
+
+        self.server.shutdown()
+
+        self.assertEqual(self.server.clients, {})
+        self.assertTrue(all(client.socket is None for client in clients))
+        self.assertEqual(self.server.server_socket.fileno(), -1)
+        for peer in peers:
+            peer.settimeout(5)
+            try:
+                while peer.recv(64):  # drain the welcome message, then expect EOF
+                    pass
+            except ConnectionResetError:
+                pass  # Windows may reset instead of a clean FIN; either way the socket is closed
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -141,8 +141,9 @@ class ServerSocket():
                     conn, address = self.server_socket.accept()
                     port = conn.getpeername()[1]
                     if(port in self.clients):
-                        print("bruuuh")
-                        return
+                        print("rejected connection from", address, "- port", port, "already in use by another client")
+                        conn.close()
+                        continue
 
                     client = ClientSocket(conn)
                     self.clients[port] = client
@@ -164,6 +165,7 @@ class ServerSocket():
             pass
 
     def shutdown(self):
-        for client in self.clients:
+        for client in self.clients.values():
             client.shutdown()
+        self.clients.clear()
         self.server_socket.close()
