@@ -89,7 +89,7 @@ class Server(NetworkService):
             sender.send("Type 'rsa' and then 'dh' to start communicating securely".encode("utf-8"))
             return
         
-        # decrypt incoming správu
+        # decrypt the incoming message
         try:
             plaintext = self.decrypt_and_decode(data, self.client_aes_keys[sender.port])
             print(f"[Message from Client {sender.port}]: {plaintext}")
