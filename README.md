@@ -1,105 +1,157 @@
-# Zabezpečená komunikace
-- autoři: Gabriel Madový (283573), Petr Věříš (283559), Oliver Synak (281728), Donát Szabó (283384)
+# Secure Chat (Zabezpečená komunikace)
 
-## Popis
-- jednoduchý chatovací program, který slouží jako kryptografický playground
-- k serveru se připojí klienti a mohou chatovat ve skupině
-- komunikace je zabezpečena pomocí symetrického šifrování (AES-GCM), výměny klíčů (Diffie-Hellman s HKDF) a asymetrické autentizace (RSA)
-- obsahuje integrovaného proxy útočníka pro demonstraci Man-in-the-Middle (MITM) útoků
+A small group-chat program used as a cryptography playground: clients connect to a server and chat,
+and a built-in man-in-the-middle (MITM) proxy shows what the protection does and does not stop.
 
-## Návod
-### Instalace
-- Python 3.10+
-- ``pip install -r requirements.txt``
+Authors: Gabriel Madový (283573), Petr Věříš (283559), Oliver Synak (281728), Donát Szabó (283384).
+Course project for BPC-AKR (Applied Cryptography), FEKT VUT, 2025/2026.
 
-### Testy
-- z kořenového adresáře repozitáře: ``python -m unittest discover -s Test -t .``
+## How the protocol works
 
-### Spuštění a připojení
-- server
-    - ``python main.py server [adresa ze které bude přijímat připojení] [port]`` (př. ``python main.py server 127.0.0.1 8000``)
-    - ve výchozím stavu se spouští v **bezpečném režimu** (vynucuje RSA ověření)
-    - pro demonstraci zranitelnosti vůči útokům přidejte parametr ``--unsecure``
-- útočník (MITM proxy)
-    - ``python main.py attack [adresa cílového serveru] [port cílového serveru]`` (př. ``python main.py attack 127.0.0.1 8000``)
-    - útočník otevře naslouchací port o číslo vyšší (např. 8001) na adrese ``127.0.0.1``, na který se připojují oběti (klienti)
-- klient
-    - ``python main.py client [adresa serveru nebo útočníka] [port] [jméno instance]``
-    - př. přímé připojení na server: ``python main.py client 127.0.0.1 8000 klient1``
-    - př. připojení přes proxy útočníka: ``python main.py client 127.0.0.1 8001 klient1``
-    - jméno instance je nepovinné (výchozí ``default``) a určuje názvy souborů s klíči
-    - pro zranitelný režim přidejte parametr ``--unsecure``
-- parametr ``--unsecure`` může stát kdekoliv; při chybných parametrech se vypíše nápověda (``python main.py -h``)
-- soubory s klíči (``*.json``) se ukládají do **aktuálního pracovního adresáře**; při spuštění z jiného adresáře vznikne nová identita
+| Layer | What the code does |
+|---|---|
+| Transport | TCP. Every message is sent as a frame with a 4-byte big-endian length prefix (`networkstack.py`). |
+| Authentication (secure mode only) | RSA "hash and sign": the SHA-256 digest of a message is signed with the raw RSA private key (`RSA/`). There is no padding scheme (no PSS or PKCS#1). Keys are 1024-bit (`RSA/RSA_Main.py`), with e = 65537. |
+| Key exchange | Ephemeral Diffie-Hellman with the fixed RFC 3526 MODP Group 14 (2048-bit prime, g = 2). Public keys must lie in (1, p-1), and a `DH_INIT` with any other group is rejected (`diffieHellman/`). |
+| Key derivation | HKDF-SHA256 turns the shared secret into a 32-byte AES-256 key. |
+| Encryption | AES-GCM implemented in `GCM/` (GCTR + GHASH on top of AES-ECB from `cryptography`), with a random 12-byte nonce and a 16-byte tag. No associated data is authenticated. |
 
-### Výměna RSA klíčů (autentizace, jen bezpečný režim)
-- klient
-    - po připojení k serveru použít příkaz ``rsa`` (v režimu ``--unsecure`` se tento krok přeskakuje)
-        - pokud existuje soubor ``[jméno instance]_client_key.json``, načte z něj vlastní veřejný a privátní klíč
-        - pokud soubor neexistuje, vygeneruje nové klíče a uloží je do souboru
-    - klient se serverem si vymění veřejné klíče
-        - pokud existuje soubor ``[jméno instance]_server_key.json``, porovná uložený veřejný klíč serveru s obdrženým; pokud se neshodují, upozorní na možný útok a klíč nepřijme
-        - pokud soubor neexistuje, obdržený klíč uloží (trust on first use)
-- server
-    - při startu načte veřejný a privátní klíč ze souboru ``server_key.json``, nebo je vygeneruje a uloží
-- útočník
-    - pakety ``RSA_INIT`` přeposílá beze změny; RSA klíče nepodvrhuje
-- poškozený soubor s klíči se ohlásí chybou, aplikace ho nepřepíše
+In **secure mode** (the default) the client and server first exchange RSA public keys (`rsa`), and both
+Diffie-Hellman messages are signed. The client rejects an unsigned `DH_ACCEPT` and does not send chat
+text until a session key exists.
+In **unsecure mode** (`--unsecure`) there is no RSA step, the Diffie-Hellman exchange is not
+authenticated, and the MITM proxy can take over the session. That is the point of the demo.
 
-### Diffie-Hellman & KDF
-Tento modul zajišťuje ustavení sdíleného tajemství a následnou derivaci 256-bitového symetrického klíče pro AES.
+Packet formats (`protocol.py`):
 
-**Technická specifikace:**
-- **Parametry:** Protokol využívá fixní parametry **RFC 3526 MODP Group 14** (2048-bitové bezpečné prvočíslo $p$ a generátor $g=2$). Odpovídající strana odmítne ``DH_INIT`` s jinými parametry.
-- **KDF (Key Derivation):** Surové tajemství (shared secret) je transformováno na finální klíč pomocí funkce **HKDF** s algoritmem **SHA-256**.
-- **Bezpečnost:** Implementace **Ephemeral Diffie-Hellman (DHE)** zajišťuje *Perfect Forward Secrecy*. Veřejné klíče jsou validovány proti útokům na malé podgrupy (*Small Subgroup Attacks*).
+```
+RSA_INIT:<e>:<n>                 public RSA key
+RSA_AUTH:<message>|<signature>   message signed with the sender's RSA key
+DH_INIT:<p>:<g>:<A>              Diffie-Hellman offer
+DH_ACCEPT:<B>                    Diffie-Hellman answer
+<length:4><nonce:12><tag:16><ciphertext>   encrypted chat message
+```
 
-**Klíčové funkce:**
-- `DHLogic.py`:
-  - `generate_private_key(p)`: Generuje kryptograficky bezpečný privátní exponent.
-  - `is_valid_public_key(public_key, p)`: Ověřuje, zda přijatý veřejný klíč leží v bezpečném intervalu $(1, p-1)$.
-  - `derive_aes_key(shared_secret)`: Provádí derivaci 32-bajtového klíče pomocí HKDF-SHA256.
-- `DHNetwork.py`:
-  - `build_init_packet()`: Sestavuje iniciační paket `DH_INIT` pro zahájení výměny.
-  - `process_init_packet()` & `process_accept_packet()`: Zpracovávají handshake a provádějí finální výpočet klíče.
+## Requirements
 
-**Průběh v aplikaci:**
-- klient
-    - po výměně RSA klíčů použít příkaz ``dh`` (v režimu ``--unsecure`` rovnou)
-    - v bezpečném režimu jsou ``DH_INIT`` i ``DH_ACCEPT`` podepsány RSA klíčem odesílatele; klient odmítne nepodepsaný ``DH_ACCEPT``
-    - při úspěchu je následující komunikace šifrována pomocí AES-GCM
+- Python 3.13 (the version the tests were run with)
+- the packages in `requirements.txt` (`cryptography`, `sympy`)
 
-### AES-GCM
-- klient
-    - po úspěšném ``dh`` vznikne symetrický AES session key
-    - při odeslání zprávy: vygeneruje se náhodný nonce -> zpráva se zašifruje -> vznikne paket ``length | nonce | tag | ciphertext``
-    - při přijetí zprávy: ověří se autentizační tag; pokud ověření selže, zpráva se zahodí, jinak se zobrazí
-- server
-    - po úspěšném DH uchovává AES klíč pro každého klienta zvlášť a po jeho odpojení ho zahodí
-    - zprávu od klienta dešifruje jeho klíčem, vytvoří zprávu ve tvaru ``port: zpráva`` a každému dalšímu klientovi ji zašifruje jeho klíčem
+```bash
+python -m venv .venv
+```
 
-### Chatování
-- klient
-    - libovolný jiný text se odešle jako zpráva do chatu
-    - bez session klíče se v bezpečném režimu zpráva **neodešle**; v režimu ``--unsecure`` se odešle nešifrovaně
-    - server zprávu dešifruje a přepošle ostatním připojeným klientům
-- útočník (pokud klienti komunikují přes něj)
-    - ``attack`` - zapne/vypne aktivní MITM útok: útočník zachytí DH výměnu, podvrhne vlastní veřejné klíče, vyjedná si šifrování s oběma stranami a pak dešifruje a vypisuje celou komunikaci
-        - útok **uspěje pouze v režimu ``--unsecure``**; v bezpečném režimu podpis prozradí změněný ``DH_INIT``, server paket zahodí a klíč se nevyjedná
-    - ``tamper <text>`` - nahradí obsah další zachycené a dešifrované zprávy zadaným textem a znovu ji zašifruje
-    - ``spoof`` - zapne/vypne nahrazování všech zpráv falešnými zprávami na obě strany
-    - ``help`` - vypíše seznam příkazů
+Activate it (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` on Linux/macOS), then:
 
-### Ukončení
-- server
-    - kombinací Ctrl + C
-- klient, útočník
-    - příkazem ``exit`` nebo kombinací Ctrl + C
+```bash
+pip install -r requirements.txt
+```
 
-### Struktura projektu
-- ``main.py`` - parametry příkazové řádky a spuštění zvolené role
-- ``client.py``, ``server.py``, ``attacker.py`` - jednotlivé role; ``networkservice.py`` - společný základ a AES-GCM pakety
-- ``protocol.py`` - formáty všech paketů
-- ``networkstack.py`` - TCP vrstva s rámci s 4-bajtovou délkou
-- ``RSA/``, ``diffieHellman/``, ``GCM/`` - kryptografické moduly
-- ``Test/`` - unit a end-to-end testy
+## Running the demo
+
+Start each role in its own terminal, from the repository root.
+
+Server (listens on the given address and port):
+
+```bash
+python main.py server 127.0.0.1 8000
+```
+
+MITM proxy (relays to the server and listens on `127.0.0.1` at the server port + 1, here 8001):
+
+```bash
+python main.py attack 127.0.0.1 8000
+```
+
+Client connecting directly to the server, or through the proxy. The last argument is an instance
+name (default `default`) that selects the client's key files:
+
+```bash
+python main.py client 127.0.0.1 8000 alice
+```
+
+```bash
+python main.py client 127.0.0.1 8001 bob
+```
+
+Add `--unsecure` to the server, proxy and client commands for unsecure mode (it may appear anywhere
+on the command line). Run `python main.py -h` for the full usage.
+
+### Client commands
+
+| Command | Effect |
+|---|---|
+| `rsa` | Exchange RSA public keys with the server (secure mode only) |
+| `dh` | Run the Diffie-Hellman exchange and derive the AES session key |
+| any other text | Send it as a chat message (encrypted once a session key exists) |
+| `help` | List the commands |
+| `exit` | Disconnect and quit |
+
+### MITM proxy commands
+
+| Command | Effect |
+|---|---|
+| `attack` | Toggle the active attack: replace both Diffie-Hellman public keys and decrypt, print and re-encrypt all traffic |
+| `tamper <text>` | Replace the next intercepted and decrypted message with `<text>` |
+| `spoof` | Toggle replacing every relayed message with a fake one |
+| `help` | List the commands |
+| `exit` | Stop the proxy |
+
+Stop the server with Ctrl+C. Ctrl+C also stops a client or the proxy.
+
+### The four demo scenarios
+
+| Scenario | Steps | Expected outcome |
+|---|---|---|
+| Secure chat | server; two clients on port 8000; each runs `rsa`, then `dh`; one sends a message | The other client prints `[Message from Server]: <port>: <message>` |
+| Unsecure chat | as above with `--unsecure` everywhere and without `rsa` | The message is delivered |
+| MITM, unsecure | server and proxy with `--unsecure`; proxy `attack`; two clients on port 8001 with `--unsecure` run `dh` and chat | The message is delivered, and the proxy prints `[MITM] Extracted Plaintext: <message>` |
+| MITM, secure | server and proxy in secure mode; proxy `attack`; two clients on port 8001 run `rsa`, then `dh` | The server prints `[Security] HACKER DETECTED! Signature invalid. Dropping packet.`, no session key is derived, and no chat message gets through |
+
+Console output of the program is partly in Czech.
+
+## Key files
+
+Keys are stored as JSON in the **current working directory**:
+
+| File | Content |
+|---|---|
+| `server_key.json` | The server's RSA key pair, created on first start |
+| `<instance>_client_key.json` | The client's RSA key pair, created on the first `rsa` |
+| `<instance>_server_key.json` | The server public key the client saw first. A different key later is reported as a possible attack and rejected (trust on first use). |
+
+Private keys are stored unencrypted. The `.gitignore` excludes `*.json`, so never commit them.
+
+## Tests
+
+```bash
+python -m unittest discover -s Test -t .
+```
+
+The suite has 70 tests: unit tests for framing, packet formats, AES-GCM (including known-answer
+vectors), RSA keys, Diffie-Hellman, the CLI, error handling and the secure-mode rules, plus end-to-end
+tests that start the server, proxy and clients as subprocesses and run the four demo scenarios on
+localhost. A full run takes about 30 seconds.
+
+## Project layout
+
+```
+main.py               command-line entry point
+client.py             chat client
+server.py             chat server
+attacker.py           MITM proxy
+networkservice.py     shared base class and AES-GCM message helpers
+networkstack.py       length-prefixed TCP framing
+protocol.py           packet formats
+RSA/                  RSA key generation, signing and key files
+diffieHellman/        Diffie-Hellman and HKDF
+GCM/                  AES-GCM implementation
+Test/                 unit and end-to-end tests
+```
+
+## Known limitations
+
+- Textbook RSA signatures with 1024-bit keys, and no replay protection. Fine for teaching, not for
+  real use.
+- The MITM proxy always listens on `127.0.0.1`.
+- Key files depend on the working directory: starting from another directory creates a new identity.
