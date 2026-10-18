@@ -1,4 +1,5 @@
 import socket
+import struct
 import unittest
 
 import networkstack
@@ -102,6 +103,22 @@ class TestServerSocket(unittest.TestCase):
         self.server.process(lambda *args: None)  # flush the welcome message
         peer.settimeout(5)
         self.assertEqual(peer.recv(64)[4:], b"welcome to the server")
+
+    def test_reset_client_is_dropped_and_others_still_accepted(self):
+        reset_peer = self.connect()
+        reset_port = reset_peer.getsockname()[1]
+        reset_peer.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        reset_peer.close()  # linger 0 -> RST instead of FIN
+        self.peers.remove(reset_peer)
+
+        for _ in range(5):
+            if reset_port not in self.server.clients:
+                break
+            self.server.process(lambda *args: None)
+        self.assertNotIn(reset_port, self.server.clients)
+
+        peer = self.connect()
+        self.assertIn(peer.getsockname()[1], self.server.clients)
 
     def test_shutdown_closes_all_clients(self):
         peers = [self.connect(), self.connect()]

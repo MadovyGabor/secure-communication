@@ -52,7 +52,7 @@ class ClientSocket():
         if(len(ready_to_write) != 0):
             self.process_writing()
         if(len(in_error) != 0):
-            print("erroooor")
+            print("socket error condition on connection", self.port)
 
         return result
 
@@ -84,7 +84,10 @@ class ClientSocket():
             else:
                 recv_len = MSG_PREFIX_SIZE - len(state.header_buff)
 
-        received = self.socket.recv(recv_len)
+        try:
+            received = self.socket.recv(recv_len)
+        except ConnectionError:
+            received = b"" # reset by peer is a disconnect too
         if(received == b""):
             self.recv_queue.pop(0)
             return False # disconnected
@@ -115,54 +118,59 @@ class ServerSocket():
     def process(self, recv_handler, recv_handler_args = ()):
         sockets_to_read = [self.server_socket]
         sockets_to_write = []
-        clients_to_remove = []
-        for key in self.clients:
-            # kontrola odpojených socketů
-            try:
-                self.clients[key].socket.getpeername()
-            except OSError:
-                clients_to_remove.append(key)
-                continue
-            
-            socket = self.clients[key].socket
-            sockets_to_read.append(socket)
-            sockets_to_write.append(socket)
-
-        for key in clients_to_remove:
-            print("client", self.clients[key].port ,"disconnected")
-            self.clients.pop(key)
+        socket_ports = {}
+        for port, client in self.clients.items():
+            socket_ports[client.socket] = port
+            sockets_to_read.append(client.socket)
+            sockets_to_write.append(client.socket)
 
         ready_to_read, ready_to_write, in_error = select.select(sockets_to_read, sockets_to_write, [], 60)
-        
-        # pro případ, že se klient odpojí mezi select a prací se socketem
-        try:
-            for socket in ready_to_read:
-                if(self.server_socket == socket):
-                    conn, address = self.server_socket.accept()
-                    port = conn.getpeername()[1]
-                    if(port in self.clients):
-                        print("rejected connection from", address, "- port", port, "already in use by another client")
-                        conn.close()
-                        continue
 
-                    client = ClientSocket(conn)
-                    self.clients[port] = client
-                    client.send(b"welcome to the server") # TODO: event
-                    print("client", port, "connected")
-                else:
-                    port = socket.getpeername()[1]
-                    client = self.clients[port]
-                    if(not client.process_reading(recv_handler, recv_handler_args)): # a client disconnected
-                        print("client", port, "disconnected")
-                        del self.clients[port]
-                        client.shutdown()
-                        if(socket in sockets_to_write):
-                            sockets_to_write.remove(socket)
-            
-            for socket in sockets_to_write:
-                self.clients[socket.getpeername()[1]].process_writing()
-        except OSError:
-            pass
+        # a socket error on one client (e.g. connection reset) disconnects only that client
+        disconnected = set()
+        for sock in ready_to_read:
+            if(sock is self.server_socket):
+                self.accept_client()
+                continue
+
+            port = socket_ports[sock]
+            try:
+                connected = self.clients[port].process_reading(recv_handler, recv_handler_args)
+            except OSError:
+                connected = False
+            if(not connected):
+                disconnected.add(port)
+
+        for sock in sockets_to_write:
+            port = socket_ports[sock]
+            if(port in disconnected):
+                continue
+            try:
+                self.clients[port].process_writing()
+            except OSError:
+                disconnected.add(port)
+
+        for port in disconnected:
+            print("client", port, "disconnected")
+            self.clients.pop(port).shutdown()
+
+    def accept_client(self):
+        try:
+            conn, address = self.server_socket.accept()
+            port = conn.getpeername()[1]
+        except OSError as e:
+            print("failed to accept connection:", e)
+            return
+
+        if(port in self.clients):
+            print("rejected connection from", address, "- port", port, "already in use by another client")
+            conn.close()
+            return
+
+        client = ClientSocket(conn)
+        self.clients[port] = client
+        client.send(b"welcome to the server") # TODO: event
+        print("client", port, "connected")
 
     def shutdown(self):
         for client in self.clients.values():

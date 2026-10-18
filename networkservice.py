@@ -85,9 +85,8 @@ class Client(NetworkService):
                 continue
 
             if input_ == "exit":
-                self.lock.acquire()
-                self.client_socket.shutdown()
-                self.lock.release()
+                with self.lock:
+                    self.client_socket.shutdown()
                 return
 
             elif input_ == "attack":
@@ -103,7 +102,11 @@ class Client(NetworkService):
                     print("[Client] Error: Insecure mode. Run 'dh' directly.")
                     continue
                 # RSA handshake!
-                packet, self.my_rsa_priv = RSA_Main.build_rsa_init_packet(self.instance + "_client_key.json")
+                try:
+                    packet, self.my_rsa_priv = RSA_Main.build_rsa_init_packet(self.instance + "_client_key.json")
+                except ValueError as e:
+                    print(f"[Client] Error: {e}")
+                    continue
                 if self.network_thread.is_alive():
                     self.send(packet.encode("utf-8"))
 
@@ -134,9 +137,13 @@ class Client(NetworkService):
     
     def network_loop(self):
         while self.client_socket.socket is not None:
-            self.lock.acquire()
-            connected = self.client_socket.process(self.recv)
-            self.lock.release()
+            with self.lock:
+                if self.client_socket.socket is None:
+                    return
+                try:
+                    connected = self.client_socket.process(self.recv)
+                except OSError:
+                    connected = False
             if(not connected):
                 self.client_socket.shutdown()
                 print("[Client] Server connection lost.")
@@ -162,8 +169,14 @@ class Client(NetworkService):
 
     def receive_handler(self, sender_socket, data : bytes):
         try:
+            self.handle_packet(data)
+        except Exception as e:
+            print(f"[Client] Error: dropping malformed packet from server: {e}")
+
+    def handle_packet(self, data : bytes):
+        try:
             message = data.decode("utf-8")
-        except:
+        except UnicodeDecodeError:
             message = None
 
         if message is not None and message.startswith("RSA_INIT:"):
@@ -188,14 +201,22 @@ class Client(NetworkService):
             message = inner_message
 
         if message is not None and message.startswith("DH_ACCEPT:"):
+            if self.p is None or self.private_key is None:
+                print("[Security] Ignoring DH_ACCEPT: no Diffie-Hellman exchange in progress.")
+                return
             self.raw_dh_secret, self.aes_session_key = DHNetwork.process_accept_packet(message, self.p, self.private_key)
+            self.private_key = None
             print(f"[DH Protocol] Raw DH Secret: {str(self.raw_dh_secret)[:15]}...")
             print(f"[DH Protocol] AES Session Key Derived: {self.aes_session_key.hex()[:15]}...")
             return
 
         # received encrypted message
         if(self.aes_session_key is not None):
-            decrypted_message = self.decrypt_and_decode(data, self.aes_session_key)
+            try:
+                decrypted_message = self.decrypt_and_decode(data, self.aes_session_key)
+            except ValueError as e:
+                print(f"[Security] Decryption failed: {e}")
+                return
             print(f"[Message from Server]: {decrypted_message}")
         else:
             print("[Warning] Received unencrypted message!")
@@ -231,8 +252,14 @@ class Server(NetworkService):
 
     def receive_handler(self, sender, data: bytes):
         try:
+            self.handle_packet(sender, data)
+        except Exception as e:
+            print(f"[Server] Error: dropping malformed packet from client {sender.port}: {e}")
+
+    def handle_packet(self, sender, data: bytes):
+        try:
             message = data.decode("utf-8")
-        except:
+        except UnicodeDecodeError:
             message = None
 
         # 1. Incoming Client RSA Key
@@ -268,6 +295,9 @@ class Server(NetworkService):
                 print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
                 print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
                 return
+
+            print("[Server] Error: unsupported authenticated message.")
+            return
 
         # 2.5 Unauthenticated Client Messages
         if message is not None and message.startswith("DH_INIT:"):

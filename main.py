@@ -40,7 +40,7 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     try:
         service = build_service(args)
-    except OSError as e:
+    except (OSError, ValueError) as e:
         print(f"Error: cannot start {args.mode} on {args.host}:{args.port}: {e}", file=sys.stderr)
         return 1
     run(service)
