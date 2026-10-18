@@ -1,3 +1,4 @@
+"""RSA protocol layer: key loading, RSA_INIT key exchange and RSA_AUTH signed packets."""
 import hashlib
 
 import protocol

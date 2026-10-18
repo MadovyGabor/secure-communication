@@ -1,3 +1,4 @@
+"""Chat client: RSA key exchange, Diffie-Hellman handshake and AES-GCM encrypted chat."""
 import threading
 import time
 
@@ -9,6 +10,8 @@ from RSA import RSA_Main
 from RSA import RSA_Math as RSA_Logic
 
 class Client(NetworkService):
+    """Interactive chat client: reads commands from stdin and talks to the server on a network thread."""
+
     def __init__(self, host : str, port : int, instance : str = "default", secure=False):
         super().__init__(host, port)
         self.secure = secure
@@ -54,7 +57,6 @@ class Client(NetworkService):
                 if not self.secure:
                     print("[Client] Error: Insecure mode. Run 'dh' directly.")
                     continue
-                # RSA handshake!
                 try:
                     my_rsa_pub, self.my_rsa_priv = RSA_Main.load_or_create_keys(self.instance + "_client_key.json")
                     packet = RSA_Main.build_rsa_init_packet(my_rsa_pub)
@@ -162,7 +164,7 @@ class Client(NetworkService):
             print(f"[DH Protocol] AES Session Key Derived: {self.aes_session_key.hex()[:15]}...")
             return
 
-        # received encrypted message
+        # chat message: decrypted once a session key exists, otherwise shown as plaintext
         if(self.aes_session_key is not None):
             try:
                 decrypted_message = self.decrypt_and_decode(data, self.aes_session_key)

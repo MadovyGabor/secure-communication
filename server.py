@@ -1,3 +1,4 @@
+"""Chat server: authenticates clients, answers the Diffie-Hellman handshake and relays encrypted chat."""
 import socket
 
 import networkstack
@@ -7,6 +8,8 @@ from networkservice import NetworkService
 from RSA import RSA_Main
 
 class Server(NetworkService):
+    """Chat server: keeps RSA and AES keys per client and forwards each message to the other clients."""
+
     def __init__(self, host : str, port : int, secure=False):
         super().__init__(host, port)
         self.secure = secure
@@ -22,7 +25,6 @@ class Server(NetworkService):
 
         # RSA handling
         self.client_rsa_keys = {}
-        # Load server's keys
         self.my_rsa_pub, self.my_rsa_priv = RSA_Main.load_or_create_keys("server_key.json")
 
         print(f"[Server] Started listening on port {port}")
@@ -120,7 +122,7 @@ class Server(NetworkService):
 
     # helper function for encrypting data and sending it to a client
     def send_encrypted_to_client(self, client_socket, data: bytes, secret: bytes, handler = None, handler_args = ()):
-        # AES-GCM
+        # argument type and key length checks before encrypting
         if not isinstance(data, (bytes, bytearray)):
             raise TypeError("data must be bytes-like")
 

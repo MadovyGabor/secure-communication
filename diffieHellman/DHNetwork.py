@@ -1,3 +1,4 @@
+"""Diffie-Hellman handshake packets: build DH_INIT, answer it with DH_ACCEPT and derive the AES key."""
 import protocol
 from diffieHellman import DHLogic
 

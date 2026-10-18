@@ -1,3 +1,4 @@
+"""Shared base class for the client, server and attacker, with AES-GCM payload helpers."""
 import os
 import socket
 from abc import ABC, abstractmethod

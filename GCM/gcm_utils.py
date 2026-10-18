@@ -1,3 +1,5 @@
+"""Byte helpers for AES-GCM: XOR, 32-bit counter increment and zero-padded block splitting."""
+
 def xor_bytes(a: bytes, b: bytes) -> bytes:
     if len(a) != len(b):
         raise ValueError("XOR length mismatch")

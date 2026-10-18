@@ -1,20 +1,27 @@
+"""TCP transport with 4-byte length-prefixed frames, driven by select()."""
 import select
 
 MSG_PREFIX_SIZE = 4
 
 class SendState():
+    """An outgoing frame and the part of it that is not sent yet."""
+
     def __init__(self, buff = bytes(), handler = None, handler_args = ()):
         self.buff = buff
         self.handler = handler
         self.handler_args = handler_args
 
 class RecvState():
+    """A frame being received: header bytes, expected length and body so far."""
+
     def __init__(self, header_buff = bytes(), data_len = -1, data_buff = bytes()):
         self.header_buff = header_buff
         self.data_len = data_len
         self.data_buff = data_buff
 
 class ClientSocket():
+    """One TCP connection with a send queue and incremental frame reading."""
+
     def __init__(self, sock = None):
         self.socket = sock
         self.send_queue = []
@@ -109,6 +116,8 @@ class ClientSocket():
             self.socket = None
 
 class ServerSocket():
+    """Listening socket that accepts clients and serves all connections with select()."""
+
     def __init__(self, server_socket, on_disconnect = None):
         self.server_socket = server_socket
         self.clients = {}

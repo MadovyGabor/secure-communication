@@ -1,3 +1,4 @@
+"""Diffie-Hellman math: RFC 3526 Group 14 parameters, public key checks and HKDF key derivation."""
 import secrets
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -64,7 +65,8 @@ def derive_aes_key(shared_secret: int) -> bytes:
     Returns:
         bytes: The derived 32-byte symmetric key.
     """
-    # Convert integer to bytes (256 bytes for a 2048-bit number)
+    # Convert to big-endian bytes of minimal length: at most 256 bytes for a 2048-bit secret,
+    # fewer when the secret has leading zero bytes (both peers do the same, so the keys match)
     shared_secret_bytes = shared_secret.to_bytes((shared_secret.bit_length() + 7) // 8, byteorder='big')
     
     # Use HKDF to derive a strong symmetric key

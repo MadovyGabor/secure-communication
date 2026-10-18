@@ -1,9 +1,11 @@
+"""RSA math and key files: key generation, textbook signing and verification, JSON storage."""
 import sympy
 import json
 import os
 
 
 def generate_rsa_parameters(key_size: int = 2048) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Generate an RSA key pair. The program always passes 1024 bits (RSA_Main.load_or_create_keys); the 2048 default is unused."""
 
     # p and q are the large prime numbers
     p = sympy.randprime(2 ** (key_size // 2 - 1), 2 ** (key_size // 2))
@@ -42,6 +44,7 @@ def rsa_verify(message_int: int, signature_int: int, public_key: tuple[int, int]
 
 def save_keys_to_json(public_key: tuple[int, int], private_key: tuple[int, int],
                       filename: str = "rsa_keys.json") -> None:
+    """Save a key pair as JSON. Callers always pass a file name; the rsa_keys.json default is not used by the program."""
 
     e, n = public_key
     d, _ = private_key  # The 'n' is the same for both, so we only need it once
@@ -58,6 +61,7 @@ def save_keys_to_json(public_key: tuple[int, int], private_key: tuple[int, int],
 
 
 def load_keys_from_json(filename: str = "rsa_keys.json") -> tuple[tuple[int, int], tuple[int, int]]:
+    """Load a key pair from JSON, or return (None, None) if the file does not exist. The rsa_keys.json default is not used by the program."""
 
     if not os.path.exists(filename):
         print(f"[RSA Protocol] Warning: Key file '{filename}' not found.")

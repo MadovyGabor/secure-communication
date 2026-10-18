@@ -1,3 +1,4 @@
+"""GF(2^128) multiplication and the GHASH function of AES-GCM."""
 from GCM.gcm_utils import xor_bytes, split_blocks
 
 def gf_multiply(x: bytes, h: bytes) -> bytes:

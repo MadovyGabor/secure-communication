@@ -1,3 +1,4 @@
+"""MITM proxy that relays clients to the real server and can read, tamper with and spoof their traffic."""
 import socket
 import threading
 import time
@@ -8,8 +9,9 @@ from diffieHellman import DHLogic
 from networkservice import NetworkService
 
 class Attacker(NetworkService):
+    """MITM proxy on the server port + 1 that can swap Diffie-Hellman keys, decrypt, tamper and spoof."""
+
     def __init__(self, host, port, secure=False):
-        # Target server
         self.target_host = host
         self.target_port = port
         
@@ -22,7 +24,8 @@ class Attacker(NetworkService):
         self.tamper_text = None
         self.secure = secure
         
-        # Map: RealClientPort -> { 'server_socket': ClientSocket, 'client_socket': ClientSocket }
+        # Map: RealClientPort -> { 'client_socket': ClientSocket, 'server_socket': ClientSocket,
+        #                         'mitm_state': attacker DH keys and the derived k_client / k_server }
         self.relays = {}
         
         # Setup proxy server socket
@@ -131,7 +134,6 @@ class Attacker(NetworkService):
         real_client_socket.send(tampered)
 
     def intercept(self, data, direction, port):
-        # Logging raw data
         hex_data = data.hex()
         print(f"[MITM INTERCEPT {direction}] Data: {hex_data[:30]}{'...' if len(hex_data) > 30 else ''}")
         

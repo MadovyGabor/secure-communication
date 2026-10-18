@@ -1,3 +1,4 @@
+"""Command-line entry point: starts the chat server, a client or the MITM attacker."""
 import argparse
 import sys
 
