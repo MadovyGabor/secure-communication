@@ -6,10 +6,20 @@ import unittest
 import networkstack
 
 
+def tcp_pair():
+    """Connected loopback TCP sockets. socket.socketpair() is AF_UNIX on Linux, which has no peer port."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        peer = socket.create_connection(listener.getsockname())
+        local, _ = listener.accept()
+    return peer, local
+
+
 class TestClientSocketFraming(unittest.TestCase):
 
     def setUp(self):
-        self.peer, local = socket.socketpair()
+        self.peer, local = tcp_pair()
         self.client = networkstack.ClientSocket(local)
         self.received = []
 
