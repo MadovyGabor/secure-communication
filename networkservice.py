@@ -4,11 +4,11 @@ from RSA import RSA_Main
 from RSA import RSA_Math as RSA_Logic
 from GCM.GCM import aes_gcm_encrypt, aes_gcm_decrypt
 import socket, threading, time, os
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import networkstack
 
-class NetworkService():
+class NetworkService(ABC):
     def __init__(self, host : str, port : int):
         self.host = host
         self.port = port
@@ -43,17 +43,12 @@ class NetworkService():
         pass
 
 class Client(NetworkService):
-    def __init__(self, host : str, port : int, instance : str = "default", attack_send_handler = None, attack_recv_handler = None, secure=False, attack_toggle_handler=None, spoof_toggle_handler=None):
+    def __init__(self, host : str, port : int, instance : str = "default", secure=False):
         super().__init__(host, port)
         self.secure = secure
         self.instance = instance
-        self.attack_toggle_handler = attack_toggle_handler
-        self.spoof_toggle_handler = spoof_toggle_handler
         self.socket.connect((self.host, self.port))
         self.client_socket = networkstack.ClientSocket(self.socket)
-
-        self.attack_send_handler = attack_send_handler
-        self.attack_recv_handler = attack_recv_handler
 
         # --- DH parameters ---
         self.p = None
@@ -88,14 +83,6 @@ class Client(NetworkService):
                 with self.lock:
                     self.client_socket.shutdown()
                 return
-
-            elif input_ == "attack":
-                if self.attack_toggle_handler:
-                    self.attack_toggle_handler()
-
-            elif input_ == "spoof":
-                if self.spoof_toggle_handler:
-                    self.spoof_toggle_handler()
 
             elif input_ == "rsa":
                 if not self.secure:
@@ -146,7 +133,7 @@ class Client(NetworkService):
                 if self.client_socket.socket is None:
                     return
                 try:
-                    connected = self.client_socket.process(self.recv, timeout=0.1)
+                    connected = self.client_socket.process(self.receive_handler, timeout=0.1)
                 except OSError:
                     connected = False
             if(not connected):
@@ -157,20 +144,11 @@ class Client(NetworkService):
             time.sleep(0.01) # let the input thread take the lock
 
     def send(self, data):
-        if(self.attack_send_handler is None):
-            self.client_socket.send(data)
-        else:
-            self.attack_send_handler(self.client_socket, self.receive_handler, data)
+        self.client_socket.send(data)
 
     def send_encrypted_to_server(self, data, aes_session_key):
         packet = self.encrypt_payload(data, aes_session_key)
         self.send(packet)
-
-    def recv(self, sender_socket, data : bytes):
-        if(self.attack_recv_handler is None):
-            self.receive_handler(sender_socket, data)
-        else:
-            self.attack_recv_handler(self.client_socket, self.receive_handler, data)
 
     def receive_handler(self, sender_socket, data : bytes):
         try:
@@ -398,9 +376,6 @@ class Attacker(NetworkService):
         print(f"\n[MITM] Attacker Proxy started on 127.0.0.1:{self.proxy_port}")
         print(f"[MITM] Relaying traffic to {host}:{port}")
         print("[MITM] Napište 'help' pro seznam příkazů.\n")
-
-    def get_service(self):
-        return self
 
     def loop(self):
         # Start proxy processing in a background thread
