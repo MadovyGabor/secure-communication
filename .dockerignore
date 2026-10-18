@@ -1,9 +1,9 @@
 # Never send key material or local state to the Docker daemon
-*.json
-*.pem
-*.key
-__pycache__/
-*.pyc
+**/*.json
+**/*.pem
+**/*.key
+**/__pycache__/
+**/*.pyc
 .git/
 .github/
 .idea/
