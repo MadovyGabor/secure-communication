@@ -270,15 +270,7 @@ class Server(NetworkService):
 
             # If authentic
             if inner_message.startswith(protocol.DH_INIT):
-                dh_reply_packet, raw_dh_secret, aes_session_key = DHNetwork.process_init_packet(inner_message)
-                self.client_raw_dh_secrets[sender.port] = raw_dh_secret
-                self.client_aes_keys[sender.port] = aes_session_key
-
-                auth_reply = RSA_Main.build_rsa_auth_packet(dh_reply_packet, self.my_rsa_priv)
-                sender.send(auth_reply.encode("utf-8"))
-
-                print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
-                print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
+                self.respond_to_dh_init(sender, inner_message, sign=True)
                 return
 
             print("[Server] Error: unsupported authenticated message.")
@@ -290,14 +282,7 @@ class Server(NetworkService):
                 print("[Security] HACKER DETECTED! Dropping unauthenticated packet.")
                 return
 
-            dh_reply_packet, raw_dh_secret, aes_session_key = DHNetwork.process_init_packet(message)
-            self.client_raw_dh_secrets[sender.port] = raw_dh_secret
-            self.client_aes_keys[sender.port] = aes_session_key
-
-            sender.send(dh_reply_packet.encode("utf-8"))
-
-            print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
-            print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
+            self.respond_to_dh_init(sender, message, sign=False)
             return
         
         # 3. encrypted client messages
@@ -322,6 +307,18 @@ class Server(NetworkService):
         
                 self.send_encrypted_to_client(client_socket, out, client_aes_key)
     
+    def respond_to_dh_init(self, sender, dh_init: str, sign: bool):
+        dh_reply_packet, raw_dh_secret, aes_session_key = DHNetwork.process_init_packet(dh_init)
+        self.client_raw_dh_secrets[sender.port] = raw_dh_secret
+        self.client_aes_keys[sender.port] = aes_session_key
+
+        if sign:
+            dh_reply_packet = RSA_Main.build_rsa_auth_packet(dh_reply_packet, self.my_rsa_priv)
+        sender.send(dh_reply_packet.encode("utf-8"))
+
+        print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
+        print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
+
     # helper function for encrypting data and sending it to a client
     def send_encrypted_to_client(self, client_socket, data: bytes, secret: bytes, handler = None, handler_args = ()):
         # AES-GCM
