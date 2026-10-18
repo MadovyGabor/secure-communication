@@ -119,6 +119,41 @@ class Scenario:
             proc.stop()
 
 
+class LocalClient:
+    """An in-process networkservice.Client connected to a bare listening socket in a temp CWD."""
+
+    def __init__(self, secure=True):
+        import contextlib
+        import io
+        import tempfile
+        import networkservice
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.output = io.StringIO()
+        self.capture = lambda: contextlib.redirect_stdout(self.output)
+        with self.capture():
+            self.client = networkservice.Client(*self.listener.getsockname(), secure=secure)
+        self.peer, _ = self.listener.accept()
+
+    def feed(self, *packets):
+        with self.capture():
+            for packet in packets:
+                self.client.receive_handler(None, packet)
+
+    def close(self):
+        self.client.shutdown()
+        self.client.network_thread.join(timeout=5)
+        self.peer.close()
+        self.listener.close()
+        os.chdir(self.cwd)
+        self.tmp.cleanup()
+
+
 def handshake(client, secure=True):
     """Run rsa (secure only) and dh on a client; return True if a session key was derived."""
     if secure:

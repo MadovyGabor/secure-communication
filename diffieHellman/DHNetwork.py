@@ -37,6 +37,9 @@ def process_init_packet(message: str) -> tuple[str, int, bytes]:
     except (ValueError, IndexError) as e:
         raise ValueError(f"[DH Protocol] Failed to parse DH_INIT packet: {e}")
 
+    if (p, g) != DHLogic.get_dh_parameters():
+        raise ValueError("[DH Protocol] FATAL: DH parameters are not RFC 3526 Group 14!")
+
     if not DHLogic.is_valid_public_key(peer_public_key, p):
         raise ValueError("[DH Protocol] FATAL: Invalid peer public key received!")
 

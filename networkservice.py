@@ -127,14 +127,19 @@ class Client(NetworkService):
 
             else:
                 if(self.network_thread.is_alive()):
-                    encoded_message = input_.encode("utf-8")
-                    
-                    if(self.aes_session_key is not None):
-                        self.send_encrypted_to_server(encoded_message, self.aes_session_key)
-                    else:
-                        print("[Client] Sending unencrypted message...")
-                        self.send(encoded_message)  
-    
+                    self.send_chat(input_)
+
+    def send_chat(self, text : str):
+        encoded_message = text.encode("utf-8")
+
+        if(self.aes_session_key is not None):
+            self.send_encrypted_to_server(encoded_message, self.aes_session_key)
+        elif(self.secure):
+            print("[Client] Error: No session key yet. Run 'rsa' and 'dh' before chatting in secure mode.")
+        else:
+            print("[Client] Sending unencrypted message...")
+            self.send(encoded_message)
+
     def network_loop(self):
         while self.client_socket.socket is not None:
             with self.lock:
@@ -192,6 +197,7 @@ class Client(NetworkService):
             print("[RSA Protocol] SUCCESS: Exchanged RSA Public Keys with the Server!")
             return
 
+        authenticated = False
         if message is not None and message.startswith("RSA_AUTH:"):
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, self.peer_rsa_pub)
             if not is_valid:
@@ -199,8 +205,12 @@ class Client(NetworkService):
                 return
 
             message = inner_message
+            authenticated = True
 
         if message is not None and message.startswith("DH_ACCEPT:"):
+            if self.secure and not authenticated:
+                print("[Security] HACKER DETECTED! Unsigned DH_ACCEPT in secure mode. Dropping packet.")
+                return
             if self.p is None or self.private_key is None:
                 print("[Security] Ignoring DH_ACCEPT: no Diffie-Hellman exchange in progress.")
                 return
