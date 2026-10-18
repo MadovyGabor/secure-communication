@@ -110,9 +110,10 @@ class ClientSocket():
             self.socket = None
 
 class ServerSocket():
-    def __init__(self, server_socket):
+    def __init__(self, server_socket, on_disconnect = None):
         self.server_socket = server_socket
         self.clients = {}
+        self.on_disconnect = on_disconnect # called with the client's port
 
     # blocking
     def process(self, recv_handler, recv_handler_args = ()):
@@ -153,6 +154,8 @@ class ServerSocket():
         for port in disconnected:
             print("client", port, "disconnected")
             self.clients.pop(port).shutdown()
+            if(self.on_disconnect is not None):
+                self.on_disconnect(port)
 
     def accept_client(self):
         try:

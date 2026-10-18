@@ -243,7 +243,7 @@ class Server(NetworkService):
         self.socket.bind((host, port))
         self.socket.listen(1)
         
-        self.server_socket = networkstack.ServerSocket(self.socket)
+        self.server_socket = networkstack.ServerSocket(self.socket, on_disconnect=self.forget_client)
 
         #DH handling: port -> keys
         self.client_aes_keys = {}
@@ -255,6 +255,12 @@ class Server(NetworkService):
         _, self.my_rsa_priv = RSA_Main.build_rsa_init_packet("server_key.json")
 
         print(f"[Server] Started listening on port {port}")
+
+    def forget_client(self, port):
+        # a later client reusing the port must not inherit keys of the previous one
+        self.client_aes_keys.pop(port, None)
+        self.client_raw_dh_secrets.pop(port, None)
+        self.client_rsa_keys.pop(port, None)
 
     def loop(self):
         while True:
@@ -387,7 +393,7 @@ class Attacker(NetworkService):
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind(('127.0.0.1', self.proxy_port))
         self.socket.listen(5)
-        self.server_stack = networkstack.ServerSocket(self.socket)
+        self.server_stack = networkstack.ServerSocket(self.socket, on_disconnect=self.victim_disconnected)
         
         print(f"\n[MITM] Attacker Proxy started on 127.0.0.1:{self.proxy_port}")
         print(f"[MITM] Relaying traffic to {host}:{port}")
@@ -429,23 +435,34 @@ class Attacker(NetworkService):
     def proxy_thread(self):
         while True:
             try:
-                # 1. Accept and process data from Clients connecting to the proxy
-                self.server_stack.process(self.receive_from_client)
-                
-                # 2. Process data coming from the Real Server back to the proxy
-                disconnected_ports = []
-                for port, relay in self.relays.items():
-                    if not relay['server_socket'].process(self.receive_from_server, (relay['client_socket'],)):
-                        disconnected_ports.append(port)
-                
-                for port in disconnected_ports:
-                    print(f"[MITM] Relay for client port {port} disconnected.")
-                    self.relays[port]['server_socket'].shutdown()
-                    del self.relays[port]
-                    
+                self.process_once()
             except Exception:
                 pass
             time.sleep(0.01)
+
+    def process_once(self):
+        # 1. Accept and process data from Clients connecting to the proxy
+        self.server_stack.process(self.receive_from_client)
+
+        # 2. Process data coming from the Real Server back to the proxy
+        disconnected_ports = []
+        for port, relay in self.relays.items():
+            if not relay['server_socket'].process(self.receive_from_server, (relay['client_socket'],)):
+                disconnected_ports.append(port)
+
+        for port in disconnected_ports:
+            print(f"[MITM] Relay for client port {port} disconnected.")
+            self.drop_relay(port)
+
+    def victim_disconnected(self, port):
+        if port in self.relays:
+            print(f"[MITM] Client {port} disconnected, closing its relay.")
+            self.drop_relay(port)
+
+    def drop_relay(self, port):
+        relay = self.relays.pop(port, None)
+        if relay is not None:
+            relay['server_socket'].shutdown()
 
     def receive_from_client(self, client_socket, data):
         # Data from REAL CLIENT -> PROXY
