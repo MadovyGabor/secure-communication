@@ -46,6 +46,22 @@ class TestEndToEnd(unittest.TestCase):
         b.wait_for("hello-from-a")
         attacker.wait_for("[MITM] Extracted Plaintext: hello-from-a")
 
+    def test_mitm_tampers_message_in_unsecure_mode(self):
+        self.scenario.server(secure=False)
+        attacker = self.scenario.attacker(secure=False)
+        attacker.send("attack")
+        attacker.wait_for("MITM Attack Mode: ENABLED")
+        a = self.scenario.client("a", self.scenario.port + 1, secure=False)
+        b = self.scenario.client("b", self.scenario.port + 1, secure=False)
+        self.assertTrue(handshake(a, secure=False))
+        self.assertTrue(handshake(b, secure=False))
+        attacker.send("tamper forged-text")
+        attacker.wait_for("Next intercepted message will be replaced")
+        a.send("original-text")
+        b.wait_for("forged-text")
+        attacker.wait_for("TAMPERING MESSAGE")
+        self.assertFalse(b.contains("original-text"))
+
     def test_mitm_detected_in_secure_mode(self):
         server = self.scenario.server(secure=True)
         attacker = self.scenario.attacker(secure=True)
