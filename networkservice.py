@@ -27,7 +27,7 @@ class NetworkService(ABC):
     # helper function for decrypting and decoding received data
     def decrypt_and_decode(self, encrypted_data, secret):
         decrypted_data = self.decrypt_payload(encrypted_data, secret)
-        return decrypted_data.decode("utf-8", errors="ignore")
+        return decrypted_data.decode("utf-8", errors="replace")
 
 
     @abstractmethod

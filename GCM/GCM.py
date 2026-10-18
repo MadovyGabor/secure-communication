@@ -1,5 +1,5 @@
 """
-Advaned Encryption Standard - Galois/Counter Mode 
+Advanced Encryption Standard - Galois/Counter Mode 
 Oliver Synak 
 """
 
@@ -9,19 +9,7 @@ from GCM.gf import GHASH
 import hmac
 
 
-"""
---- Testovacie premenné ---
-
-key = b'\x00' * 16
-nonce = b'\x00' * 12
-plaintext = b'Hello AES GCM mode test!!!'
-
-"""
-
-
-
-
-# Gallois Counter Mode
+# Galois Counter Mode
 def gctr(key: bytes, icb: bytes, data: bytes) -> bytes:
     if len(data) == 0:
         return b""
@@ -83,16 +71,3 @@ def aes_gcm_decrypt(nonce: bytes, key: bytes, ciphertext: bytes, tag: bytes) -> 
     plaintext = gctr(key, Y1, ciphertext)
 
     return plaintext
-
-
-
-"""
-
-C, T = aes_gcm_encrypt(nonce, key, plaintext)
-print(f"Šifra: {C}\nTag: {T}")
-
-message = aes_gcm_decrypt(nonce, key, C, T)
-print(f"Dešifrovaná šifra: {message}\n")
-
-
-"""

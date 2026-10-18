@@ -1,6 +1,3 @@
-import sympy
-import json
-import os
 import hashlib
 
 import protocol
@@ -21,7 +18,7 @@ def process_rsa_init_packet(message: str) -> tuple[int, int]:
 
 
 def build_rsa_auth_packet(text_message: str, my_private_key: tuple[int, int]) -> str:
-    print(f"[RSA Protocol] Signing outgoing message for authentication...")
+    print("[RSA Protocol] Signing outgoing message for authentication...")
     message_bytes = text_message.encode('utf-8')
     message_hash = hashlib.sha256(message_bytes).digest()
     message_int = int.from_bytes(message_hash, 'big')
@@ -44,9 +41,9 @@ def process_rsa_auth_packet(message: str, peer_public_key: tuple[int, int]) -> t
     is_valid = RSALogic.rsa_verify(message_int, signature, peer_public_key)
 
     if is_valid:
-        print(f"[RSA Protocol] AUTHENTICATION SUCCESS")
+        print("[RSA Protocol] AUTHENTICATION SUCCESS")
     else:
-        print(f"[RSA Protocol] WARNING: Signature invalid!")
+        print("[RSA Protocol] WARNING: Signature invalid!")
 
     return is_valid, text_message
 

@@ -1,5 +1,3 @@
-import socket
-import json
 import select
 
 MSG_PREFIX_SIZE = 4
@@ -100,7 +98,7 @@ class ClientSocket():
             else:
                 state.data_buff = state.data_buff + received
                 if(len(state.data_buff) == state.data_len):
-                    recv_handler(*recv_handler_args, self, state.data_buff) # TODO: event
+                    recv_handler(*recv_handler_args, self, state.data_buff)
                     self.recv_queue.pop(0)
 
         return True
@@ -174,7 +172,7 @@ class ServerSocket():
 
         client = ClientSocket(conn)
         self.clients[port] = client
-        client.send(b"welcome to the server") # TODO: event
+        client.send(b"welcome to the server")
         print("client", port, "connected")
 
     def shutdown(self):

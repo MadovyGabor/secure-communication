@@ -69,8 +69,8 @@ class Attacker(NetworkService):
         while True:
             try:
                 self.process_once()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[MITM] Proxy error: {e}")
             time.sleep(0.01)
 
     def process_once(self):
@@ -186,35 +186,32 @@ class Attacker(NetworkService):
                         print(f"[MITM] K_client derived: {state['k_client'].hex()[:15]}...")
                         print(f"[MITM] K_server derived: {state['k_server'].hex()[:15]}...")
                         return protocol.join_dh_message(head, dh_parts, tail).encode("utf-8")
-                        
-            except Exception:
-                pass
+
+            except UnicodeDecodeError:
+                pass # binary frame, not a handshake packet
+            except (ValueError, TypeError) as e:
+                print(f"[MITM] Could not rewrite handshake packet, relaying it unchanged: {e}")
 
         # 2. Encrypted Message Translation
         if self.mitm_active and state['k_client'] and state['k_server']:
+            if "CLIENT -> SERVER" in direction:
+                key_in, key_out = state['k_client'], state['k_server']
+            else:
+                key_in, key_out = state['k_server'], state['k_client']
+
             try:
-                if "CLIENT -> SERVER" in direction:
-                    plaintext = self.decrypt_payload(data, state['k_client'])
-                    print(f"[MITM] Extracted Plaintext: {plaintext.decode('utf-8', errors='ignore')}")
-                    
-                    if self.tamper_text:
-                        print(f"[MITM] TAMPERING MESSAGE! Replacing with '{self.tamper_text}'")
-                        plaintext = self.tamper_text.encode("utf-8")
-                        self.tamper_text = None
-                        
-                    return self.encrypt_payload(plaintext, state['k_server'])
-                elif "SERVER -> CLIENT" in direction:
-                    plaintext = self.decrypt_payload(data, state['k_server'])
-                    print(f"[MITM] Extracted Plaintext: {plaintext.decode('utf-8', errors='ignore')}")
-                    
-                    if self.tamper_text:
-                        print(f"[MITM] TAMPERING MESSAGE! Replacing with '{self.tamper_text}'")
-                        plaintext = self.tamper_text.encode("utf-8")
-                        self.tamper_text = None
-                        
-                    return self.encrypt_payload(plaintext, state['k_client'])
-            except Exception:
-                pass
+                plaintext = self.decrypt_payload(data, key_in)
+            except ValueError as e:
+                print(f"[MITM] Could not decrypt intercepted frame, relaying it unchanged: {e}")
+                return data
+            print(f"[MITM] Extracted Plaintext: {plaintext.decode('utf-8', errors='replace')}")
+
+            if self.tamper_text:
+                print(f"[MITM] TAMPERING MESSAGE! Replacing with '{self.tamper_text}'")
+                plaintext = self.tamper_text.encode("utf-8")
+                self.tamper_text = None
+
+            return self.encrypt_payload(plaintext, key_out)
 
         return data
 

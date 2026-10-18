@@ -4,7 +4,6 @@ import os
 from diffieHellman import DHLogic
 from RSA import RSA_Math, RSA_Main
 from GCM.GCM import aes_gcm_encrypt, aes_gcm_decrypt
-from diffieHellman import DHNetwork
 
 class TestCryptoSystem(unittest.TestCase):
     
