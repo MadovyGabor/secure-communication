@@ -6,6 +6,34 @@ and a built-in man-in-the-middle (MITM) proxy shows what the protection does and
 Authors: Gabriel Madový (283573), Petr Věříš (283559), Oliver Synak (281728), Donát Szabó (283384).
 Course project for BPC-AKR (Applied Cryptography), FEKT VUT, 2025/2026.
 
+## Quick start
+
+```bash
+pip install -r requirements.txt
+```
+
+Then, each in its own terminal from the repository root:
+
+```bash
+python main.py server 127.0.0.1 8000
+```
+
+```bash
+python main.py client 127.0.0.1 8000 alice
+```
+
+```bash
+python main.py attack 127.0.0.1 8000
+```
+
+Run the tests:
+
+```bash
+python -m unittest discover -s Test -t .
+```
+
+Details for each step follow below.
+
 ## How the protocol works
 
 | Layer | What the code does |
@@ -110,6 +138,30 @@ Stop the server with Ctrl+C. Ctrl+C also stops a client or the proxy.
 
 Console output of the program is partly in Czech.
 
+## Docker
+
+`Dockerfile` and `docker-compose.yml` run the demo in containers. Start everything with:
+
+```bash
+docker compose up --build
+```
+
+The compose file defines three services, each taking the same arguments as `python main.py`:
+
+| Service | Command | Notes |
+|---|---|---|
+| `server` | `server 0.0.0.0 8000` | Keys in the `server-keys` volume. A healthcheck waits until port 8000 is listening. |
+| `attacker` | `attack server 8000` | The MITM proxy. It listens on `127.0.0.1:8001` inside its own network namespace. |
+| `client` | `client server 8000 docker` | Shares the attacker's network namespace, so it reaches the server as `server:8000` and the proxy as `127.0.0.1:8001`. Keys in the `client-keys` volume. |
+
+`server` and `attacker` are on an internal network named `chat`. The client and the proxy read
+commands from the terminal; attach to them with `docker attach secure-chat-client-1` or
+`docker attach secure-chat-attacker-1` (detach with Ctrl+P, Ctrl+Q). For a client that goes through
+the proxy, run `docker compose run --rm client client 127.0.0.1 8001 victim`. For unsecure mode, append
+`--unsecure` to the commands in `docker-compose.yml`.
+
+The image runs as a non-root user, and `.dockerignore` keeps key files out of the build context.
+
 ## Key files
 
 Keys are stored as JSON in the **current working directory**:
@@ -133,6 +185,14 @@ vectors), RSA keys, Diffie-Hellman, the CLI, error handling and the secure-mode 
 tests that start the server, proxy and clients as subprocesses and run the four demo scenarios on
 localhost. A full run takes about 30 seconds.
 
+## CI
+
+[![CI](https://github.com/MadovyGabor/secure-comunication/actions/workflows/ci.yml/badge.svg)](https://github.com/MadovyGabor/secure-comunication/actions/workflows/ci.yml)
+
+The GitHub Actions workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push
+to `main` and on every pull request to `main`. It installs `requirements.txt` on `ubuntu-latest` with
+Python 3.13 and runs `python -m unittest discover -s Test -t .`.
+
 ## Project layout
 
 ```
@@ -147,7 +207,40 @@ RSA/                  RSA key generation, signing and key files
 diffieHellman/        Diffie-Hellman and HKDF
 GCM/                  AES-GCM implementation
 Test/                 unit and end-to-end tests
+Dockerfile            container image for all three roles
+docker-compose.yml    server, attacker and client services
+.github/workflows/ci.yml   GitHub Actions workflow that runs the tests
+requirements.txt      Python dependencies
 ```
+
+## Bugs found and fixed
+
+Found while refactoring the original code (see `git log main`). Root cause line numbers refer to the
+file as it was just before the fix commit. Test names are classes and methods in `Test/`.
+
+| ID | Symptom | Root cause (file:line) | Fix | Test that covers it |
+|---|---|---|---|---|
+| B1 | Ctrl+C did not shut the service down | `main.py:9` assigned a local `service`; the handler at `main.py:37` read the global, which stayed `None` | `7be2038` | `test_cli.TestRun.test_keyboard_interrupt_shuts_service_down` |
+| B2 | Missing or invalid arguments exited silently with status 0 | `main.py:15-16`, `main.py:20-21`: bare `exit()` | `7be2038` | `test_cli.TestParseArgs.test_invalid_arguments_exit_with_usage` |
+| B3 | Server shutdown raised `AttributeError` | `networkstack.py:167` iterated the client dict's keys (ports) and called `.shutdown()` on them | `b0c64b2` | `test_networkstack.TestServerSocket.test_shutdown_closes_all_clients` |
+| B4 | A second client with an already registered peer port leaked its socket and ended the select round | `networkstack.py:144-145` returned without closing the accepted connection | `b0c64b2` | no test |
+| B5 | One malformed packet (e.g. `RSA_INIT:x`) crashed the server | `networkstack.py:164` caught only `OSError`; parse errors from `Server.receive_handler` (`networkservice.py:232`) escaped | `7edebd5` | `test_error_handling.TestServerSurvivesMalformedPackets.test_secure_server`, `test_unsecure_server` |
+| B6 | After a bad packet the client's `exit` command hung | `networkservice.py:137` acquired the lock without `try/finally`; an exception killed the thread with the lock held | `7edebd5` | `test_error_handling.TestClientSurvivesMalformedPackets.test_network_thread_survives_and_releases_lock` |
+| B7 | A tampered encrypted frame killed the client's network thread | `networkservice.py:198` did not catch the GCM authentication error | `7edebd5` | `test_error_handling.TestClientSurvivesMalformedPackets.test_tampered_ciphertext_is_dropped` |
+| B8 | A `DH_ACCEPT` without a pending exchange raised `TypeError` | `networkservice.py:191` used `self.p`, which is `None` before `dh` | `7edebd5` | `test_error_handling.TestClientSurvivesMalformedPackets.test_stray_dh_accept_is_ignored` |
+| B9 | After a client reset its connection, the server stopped accepting new clients | `networkstack.py:87` raised `ConnectionResetError`, the liveness check at `networkstack.py:122` still passed, and `networkstack.py:164` aborted every select round | `7edebd5` | `test_networkstack.TestServerSocket.test_reset_client_is_dropped_and_others_still_accepted` |
+| B10 | A corrupted key file crashed with a raw traceback | `RSA/RSA_Math.py:69-74` read the JSON fields unguarded | `7edebd5` | `test_rsa_keys.TestRsaKeyFiles.test_corrupted_key_file_raises_value_error` |
+| B11 | In secure mode the client accepted an unsigned `DH_ACCEPT` | `networkservice.py:203` handled `DH_ACCEPT` whether or not it came inside a valid `RSA_AUTH` | `db3c014` | `test_secure_mode.TestSecureClient.test_unsigned_dh_accept_is_rejected` |
+| B12 | In secure mode chat was sent in plaintext before a session key existed | `networkservice.py:134-136` fell back to an unencrypted send | `db3c014` | `test_secure_mode.TestSecureClient.test_chat_without_session_key_is_not_sent` |
+| B13 | The initiator could force a weak Diffie-Hellman group | `diffieHellman/DHNetwork.py:34-36` used `p` and `g` from the packet without checking them | `db3c014` | `test_secure_mode.TestDHGroupEnforcement.test_non_standard_group_is_rejected` |
+| B14 | The server kept a client's keys after it disconnected | `networkservice.py:249-253`: the per-port key maps were never cleared | `cb6cefd` | `test_disconnect.TestServerForgetsClient.test_keys_are_released_on_disconnect` |
+| B15 | The proxy kept a relay and its upstream connection after the victim left | `networkservice.py:458` created relays, which were only removed at `networkservice.py:444` when the server side closed | `cb6cefd` | `test_disconnect.TestAttackerDropsRelay.test_relay_closed_when_victim_disconnects` |
+| B16 | The server used 100% CPU while idle | `networkstack.py:128` passed every client to `select` as writable, so it returned at once | `ceabd7c` | `test_networkstack.TestServerSocket.test_idle_process_blocks_until_timeout` |
+| B17 | A payload of exactly 2^32 bytes raised `OverflowError` | `networkstack.py:30` checked `>` instead of `>=` | `ceabd7c` | `test_networkstack.TestClientSocketFraming.test_send_rejects_oversized_payload` |
+| B18 | The DH robustness script always reported FAIL and exited with 0 | `Test/test_dh_robustness.py:26` unpacked three return values into two names; `:34` compared a tuple to bytes | `a36946d` | `test_dh_robustness.TestDHRobustness.test_successful_signed_handshake` |
+| B19 | The framing tests failed on Linux | `Test/test_networkstack.py:12` used `socket.socketpair()`, which is AF_UNIX on Linux and has no peer port | `4370052` | the `test_networkstack.TestClientSocketFraming` tests, run on Linux in CI |
+| B20 | End-to-end tests failed intermittently with `WinError 10013` | `Test/harness.py:18` picked test ports with `bind(0)` from the ephemeral range | `dabbfc0` | no test |
+| B21 | `.dockerignore` did not exclude nested files such as `RSA/__pycache__` | `.dockerignore:2-6`: patterns without `**/` only match at the context root | `5845077` | no test |
 
 ## Known limitations
 
@@ -155,3 +248,21 @@ Test/                 unit and end-to-end tests
   real use.
 - The MITM proxy always listens on `127.0.0.1`.
 - Key files depend on the working directory: starting from another directory creates a new identity.
+
+## Contributions
+
+Original project: four-person university team project.
+
+My contributions (Gabriel Madový), from `git log --author="Gabriel Madový"`:
+
+- Refactor: `c82124f`, `2976803`, `9fdd3d5`, `a2b06a2`, `7bf825b`
+- CLI: `7be2038`
+- Bug fixes: `b0c64b2`, `7edebd5`, `db3c014`, `cb6cefd`, `ceabd7c`
+- Tests: `7bb4ce5`, `a36946d`, `03c5fa7`, `4370052`, `dabbfc0`
+- CI: `a5b5efd`
+- Docs: `5508034`, `d7bbcf6`, `6e398ef`, `a2d62c4`, `5f5ff7b`
+- Build, Docker and cleanup: `99c17c6`, `cc9ca6e`, `c06597a`, `5845077`, `08518a4`, `ff3dae0`
+
+Other team members: see repository history.
+
+TO CONFIRM: team member roles
