@@ -3,6 +3,7 @@ import json
 import os
 import hashlib
 
+import protocol
 from . import RSA_Math as RSALogic
 
 def process_rsa_init_packet(message: str) -> tuple[int, int]:
@@ -11,10 +12,7 @@ def process_rsa_init_packet(message: str) -> tuple[int, int]:
 
     print("[RSA Protocol] Received RSA_INIT packet. Parsing parameters...")
 
-    # Split the message by colons to extract the values
-    parts = message.split(":")
-    e = int(parts[1])
-    n = int(parts[2])
+    e, n = protocol.parse_rsa_init(message)
 
     print(f"[RSA Protocol] Extracted Peer's Public Key: (e={e}, n={str(n)[:15]}...)")
 
@@ -30,16 +28,14 @@ def build_rsa_auth_packet(text_message: str, my_private_key: tuple[int, int]) ->
 
     signature = RSALogic.rsa_sign(message_int, my_private_key)
 
-    packet = f"RSA_AUTH:{text_message}|{signature}"
+    packet = protocol.build_rsa_auth(text_message, signature)
     return packet
 
 
 def process_rsa_auth_packet(message: str, peer_public_key: tuple[int, int]) -> tuple[bool, str]:
     print("[RSA Protocol] Received RSA_AUTH packet. Verifying signature...")
 
-    data = message[9:]
-    text_message, signature_str = data.rsplit("|", 1)
-    signature = int(signature_str)
+    text_message, signature = protocol.parse_rsa_auth(message)
 
     message_bytes = text_message.encode('utf-8')
     message_hash = hashlib.sha256(message_bytes).digest()
@@ -71,7 +67,7 @@ def build_rsa_init_packet(filename = None) -> tuple[str, tuple[int, int]]:
 
     e, n = public_key
 
-    packet = f"RSA_INIT:{e}:{n}"
+    packet = protocol.build_rsa_init(e, n)
     print("[RSA Protocol] RSA_INIT packet built successfully. Ready to send.")
 
     return packet, private_key

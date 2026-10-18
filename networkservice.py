@@ -7,6 +7,7 @@ import socket, threading, time, os
 from abc import ABC, abstractmethod
 
 import networkstack
+import protocol
 
 class NetworkService(ABC):
     def __init__(self, host : str, port : int):
@@ -19,18 +20,13 @@ class NetworkService(ABC):
         pass
 
     def decrypt_payload(self, encrypted_data, secret):
-        packet = encrypted_data[4:]
-        nonce = packet[:12]
-        tag = packet[12:28]
-        ciphertext = packet[28:]
+        nonce, tag, ciphertext = protocol.parse_encrypted(encrypted_data)
         return aes_gcm_decrypt(nonce, secret, ciphertext, tag)
 
     def encrypt_payload(self, plaintext_bytes, secret):
-        nonce = os.urandom(12)
+        nonce = os.urandom(protocol.NONCE_SIZE)
         ciphertext, tag = aes_gcm_encrypt(nonce, secret, plaintext_bytes)
-        packet = nonce + tag + ciphertext
-        length = len(packet).to_bytes(4, 'big')
-        return length + packet
+        return protocol.build_encrypted(nonce, tag, ciphertext)
 
     # helper function for decrypting and decoding received data
     def decrypt_and_decode(self, encrypted_data, secret):
@@ -157,12 +153,9 @@ class Client(NetworkService):
             print(f"[Client] Error: dropping malformed packet from server: {e}")
 
     def handle_packet(self, data : bytes):
-        try:
-            message = data.decode("utf-8")
-        except UnicodeDecodeError:
-            message = None
+        message = protocol.decode_text(data)
 
-        if message is not None and message.startswith("RSA_INIT:"):
+        if message is not None and message.startswith(protocol.RSA_INIT):
             saved_public, _ = RSA_Logic.load_keys_from_json(self.instance + "_server_key.json")
             received_public = RSA_Main.process_rsa_init_packet(message)
             if(saved_public is not None):
@@ -176,7 +169,7 @@ class Client(NetworkService):
             return
 
         authenticated = False
-        if message is not None and message.startswith("RSA_AUTH:"):
+        if message is not None and message.startswith(protocol.RSA_AUTH):
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, self.peer_rsa_pub)
             if not is_valid:
                 print("[Security] HACKER DETECTED! Signature invalid. Dropping packet.")
@@ -185,7 +178,7 @@ class Client(NetworkService):
             message = inner_message
             authenticated = True
 
-        if message is not None and message.startswith("DH_ACCEPT:"):
+        if message is not None and message.startswith(protocol.DH_ACCEPT):
             if self.secure and not authenticated:
                 print("[Security] HACKER DETECTED! Unsigned DH_ACCEPT in secure mode. Dropping packet.")
                 return
@@ -251,13 +244,10 @@ class Server(NetworkService):
             print(f"[Server] Error: dropping malformed packet from client {sender.port}: {e}")
 
     def handle_packet(self, sender, data: bytes):
-        try:
-            message = data.decode("utf-8")
-        except UnicodeDecodeError:
-            message = None
+        message = protocol.decode_text(data)
 
         # 1. Incoming Client RSA Key
-        if message is not None and message.startswith("RSA_INIT:"):
+        if message is not None and message.startswith(protocol.RSA_INIT):
             client_pub = RSA_Main.process_rsa_init_packet(message)
             self.client_rsa_keys[sender.port] = client_pub
 
@@ -266,7 +256,7 @@ class Server(NetworkService):
             return
 
         # 2. authenticated Client Messages
-        if message is not None and message.startswith("RSA_AUTH:"):
+        if message is not None and message.startswith(protocol.RSA_AUTH):
             client_pub = self.client_rsa_keys.get(sender.port)
             if not client_pub:
                 print("[Server] Error: Client has not exchanged RSA keys yet.")
@@ -278,7 +268,7 @@ class Server(NetworkService):
                 return
 
             # If authentic
-            if inner_message.startswith("DH_INIT:"):
+            if inner_message.startswith(protocol.DH_INIT):
                 dh_reply_packet, raw_dh_secret, aes_session_key = DHNetwork.process_init_packet(inner_message)
                 self.client_raw_dh_secrets[sender.port] = raw_dh_secret
                 self.client_aes_keys[sender.port] = aes_session_key
@@ -294,7 +284,7 @@ class Server(NetworkService):
             return
 
         # 2.5 Unauthenticated Client Messages
-        if message is not None and message.startswith("DH_INIT:"):
+        if message is not None and message.startswith(protocol.DH_INIT):
             if self.secure:
                 print("[Security] HACKER DETECTED! Dropping unauthenticated packet.")
                 return
@@ -496,19 +486,9 @@ class Attacker(NetworkService):
             try:
                 msg = data.decode("utf-8")
                 
-                if "DH_INIT:" in msg and "CLIENT -> SERVER" in direction:
+                if protocol.DH_INIT in msg and "CLIENT -> SERVER" in direction:
                     print("[MITM] Intercepted DH_INIT! Deriving keys and injecting MITM public key...")
-                    parts = msg.split("DH_INIT:")
-                    dh_string = parts[1]
-                    
-                    signature_part = ""
-                    if "|" in dh_string:
-                        dh_core, signature_part = dh_string.split("|", 1)
-                        signature_part = "|" + signature_part
-                    else:
-                        dh_core = dh_string
-                        
-                    dh_parts = dh_core.split(":")
+                    head, dh_parts, tail = protocol.split_dh_message(msg, protocol.DH_INIT)
                     if len(dh_parts) >= 3:
                         p = int(dh_parts[0])
                         g = int(dh_parts[1])
@@ -522,24 +502,11 @@ class Attacker(NetworkService):
                         state['k_client'] = DHLogic.derive_aes_key(raw_k_client)
                         
                         dh_parts[2] = str(state['attacker_pub'])
-                        new_dh_core = ":".join(dh_parts)
-                        parts[1] = new_dh_core + signature_part
-                        fake_msg = "DH_INIT:".join(parts)
-                        return fake_msg.encode("utf-8")
+                        return protocol.join_dh_message(head, dh_parts, tail).encode("utf-8")
 
-                elif "DH_ACCEPT:" in msg and "SERVER -> CLIENT" in direction:
+                elif protocol.DH_ACCEPT in msg and "SERVER -> CLIENT" in direction:
                     print("[MITM] Intercepted DH_ACCEPT! Deriving keys and injecting MITM public key...")
-                    parts = msg.split("DH_ACCEPT:")
-                    dh_string = parts[1]
-                    
-                    signature_part = ""
-                    if "|" in dh_string:
-                        dh_core, signature_part = dh_string.split("|", 1)
-                        signature_part = "|" + signature_part
-                    else:
-                        dh_core = dh_string
-                        
-                    dh_parts = dh_core.split(":")
+                    head, dh_parts, tail = protocol.split_dh_message(msg, protocol.DH_ACCEPT)
                     if len(dh_parts) >= 1 and state['p'] is not None:
                         server_pub = int(dh_parts[0])
                         
@@ -547,13 +514,10 @@ class Attacker(NetworkService):
                         state['k_server'] = DHLogic.derive_aes_key(raw_k_server)
                         
                         dh_parts[0] = str(state['attacker_pub'])
-                        new_dh_core = ":".join(dh_parts)
-                        parts[1] = new_dh_core + signature_part
-                        fake_msg = "DH_ACCEPT:".join(parts)
-                        
+
                         print(f"[MITM] K_client derived: {state['k_client'].hex()[:15]}...")
                         print(f"[MITM] K_server derived: {state['k_server'].hex()[:15]}...")
-                        return fake_msg.encode("utf-8")
+                        return protocol.join_dh_message(head, dh_parts, tail).encode("utf-8")
                         
             except Exception:
                 pass
