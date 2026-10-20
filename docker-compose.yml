@@ -1,21 +1,37 @@
-# Demo: docker compose up --build
+# Demo: docker compose up -d --build
 #
 # Each service takes the same arguments as `python main.py` (see README):
-#   server   listens on 0.0.0.0:8000 inside the private network
-#   attacker relays to server:8000 and listens on 127.0.0.1:8001 of its own network namespace
-#   client   shares the attacker's network namespace, so it reaches the server as "server:8000"
-#            and the attacker proxy as "127.0.0.1:8001"
+#   server        listens on 0.0.0.0:8000 inside the private network
+#   attacker      relays to server:8000 and listens on 127.0.0.1:8001 of its own network namespace
+#   client-alice  username Alice; shares the attacker's network namespace and chats through the proxy
+#   client-bob    username Bob; same as Alice
 #
-# Interact with a service:   docker attach secure-chat-client-1   (detach: Ctrl+P, Ctrl+Q)
-# MITM demo client:          docker compose run --rm client client 127.0.0.1 8001 victim
-# The last client argument is the username (and key file prefix); leave it out to be Anonymous#N
-# Unsecure mode:             append "--unsecure" to the server, attacker and client commands
+# Server audit log:   docker compose logs -f server
+# Chat as Alice:      docker attach secure-chat-client-alice-1   (detach: Ctrl+P, Ctrl+Q; Ctrl+C quits the client)
+# Chat as Bob:        docker attach secure-chat-client-bob-1
+# Control the proxy:  docker attach secure-chat-attacker-1
+# Another client:     docker compose run --rm client-alice client 127.0.0.1 8001 Carol
+#                     (leave the name out to be Anonymous#N; use "server 8000" to bypass the proxy)
+# Unsecure mode:      append "--unsecure" to the server, attacker and client commands
 
 name: secure-chat
+
+# settings shared by every chat client; each client only adds its command and key volume
+x-client: &client
+  image: secure-chat:latest
+  stdin_open: true
+  tty: true
+  network_mode: "service:attacker"
+  depends_on:
+    server:
+      condition: service_healthy
+    attacker:
+      condition: service_healthy
 
 services:
   server:
     build: .
+    image: secure-chat:latest
     command: ["server", "0.0.0.0", "8000"]
     networks: [chat]
     volumes:
@@ -27,7 +43,7 @@ services:
       retries: 15
 
   attacker:
-    build: .
+    image: secure-chat:latest
     command: ["attack", "server", "8000"]
     stdin_open: true
     tty: true
@@ -35,20 +51,23 @@ services:
     depends_on:
       server:
         condition: service_healthy
+    healthcheck:
+      # proxy listening on 127.0.0.1:8001 (0100007F:1F41), so the clients do not connect too early
+      test: ["CMD-SHELL", "grep -q '0100007F:1F41 00000000:0000 0A' /proc/net/tcp"]
+      interval: 2s
+      retries: 15
 
-  client:
-    build: .
-    command: ["client", "server", "8000", "docker"]
-    stdin_open: true
-    tty: true
-    network_mode: "service:attacker"
-    depends_on:
-      server:
-        condition: service_healthy
-      attacker:
-        condition: service_started
+  client-alice:
+    <<: *client
+    command: ["client", "127.0.0.1", "8001", "Alice"]
     volumes:
-      - client-keys:/data
+      - alice-keys:/data
+
+  client-bob:
+    <<: *client
+    command: ["client", "127.0.0.1", "8001", "Bob"]
+    volumes:
+      - bob-keys:/data
 
 networks:
   chat:
@@ -56,4 +75,5 @@ networks:
 
 volumes:
   server-keys:
-  client-keys:
+  alice-keys:
+  bob-keys:
