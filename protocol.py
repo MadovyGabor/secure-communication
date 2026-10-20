@@ -7,16 +7,22 @@ Handshake packets are UTF-8 text:
     DH_ACCEPT:<B>                   Diffie-Hellman answer
 Chat messages after the handshake are binary AES-GCM frames:
     <length:4> <nonce:12> <tag:16> <ciphertext>
+The first encrypted frame after each Diffie-Hellman exchange carries the username:
+    NAME:<username>                 empty username = stay anonymous
 """
 
 RSA_INIT = "RSA_INIT:"
 RSA_AUTH = "RSA_AUTH:"
 DH_INIT = "DH_INIT:"
 DH_ACCEPT = "DH_ACCEPT:"
+NAME = "NAME:"
 
 LENGTH_SIZE = 4
 NONCE_SIZE = 12
 TAG_SIZE = 16
+
+MAX_NAME_LENGTH = 32
+ANONYMOUS_PREFIX = "Anonymous#"
 
 
 def decode_text(data: bytes):
@@ -74,6 +80,34 @@ def build_dh_accept(public_key: int) -> str:
 def parse_dh_accept(message: str) -> int:
     (public_key,) = _fields(message, DH_ACCEPT, 1)
     return public_key
+
+
+def normalize_name(name: str):
+    """Return the username without surrounding whitespace, or None if it cannot be used.
+
+    Rejected names (the client then stays anonymous): empty, longer than MAX_NAME_LENGTH,
+    containing control characters or brackets (they would break the "[name]: text" format)
+    and names starting with ANONYMOUS_PREFIX, which is reserved for server-assigned names.
+    """
+    name = name.strip()
+    if not name or len(name) > MAX_NAME_LENGTH:
+        return None
+    if not name.isprintable() or "[" in name or "]" in name:
+        return None
+    if name.lower().startswith(ANONYMOUS_PREFIX.lower()):
+        return None
+    return name
+
+
+def build_name(name) -> str:
+    return f"{NAME}{name or ''}"
+
+
+def parse_name(message: str):
+    """Return the username from a NAME packet, or None for an anonymous client."""
+    if not message.startswith(NAME):
+        raise ValueError(f"expected {NAME} packet")
+    return normalize_name(message[len(NAME):])
 
 
 def split_dh_message(message: str, prefix: str) -> tuple[str, list[str], str]:

@@ -69,6 +69,37 @@ class TestWireFormat(unittest.TestCase):
         self.assertEqual(protocol.parse_encrypted(frame), (nonce, tag, ciphertext))
 
 
+class TestNamePacket(unittest.TestCase):
+
+    def test_round_trip(self):
+        self.assertEqual(protocol.build_name("Alice"), "NAME:Alice")
+        self.assertEqual(protocol.parse_name("NAME:Alice"), "Alice")
+
+    def test_anonymous_packet(self):
+        self.assertEqual(protocol.build_name(None), "NAME:")
+        self.assertIsNone(protocol.parse_name("NAME:"))
+
+    def test_name_is_stripped_and_may_contain_spaces_and_colons(self):
+        self.assertEqual(protocol.parse_name("NAME:  Bob Smith  "), "Bob Smith")
+        self.assertEqual(protocol.parse_name("NAME:a:b"), "a:b")
+        self.assertEqual(protocol.parse_name("NAME:Žofie"), "Žofie")
+
+    def test_unusable_names_mean_anonymous(self):
+        for name in ["   ", "x" * (protocol.MAX_NAME_LENGTH + 1), "evil\nname", "tab\tname",
+                     "[Server]", "a]b", "Anonymous#1", "anonymous#7"]:
+            with self.subTest(name=name):
+                self.assertIsNone(protocol.normalize_name(name))
+                self.assertIsNone(protocol.parse_name(protocol.build_name(name)))
+
+    def test_longest_allowed_name(self):
+        name = "x" * protocol.MAX_NAME_LENGTH
+        self.assertEqual(protocol.normalize_name(name), name)
+
+    def test_wrong_prefix_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            protocol.parse_name("DH_ACCEPT:5")
+
+
 class TestHandshakeModulesUseSameFormat(unittest.TestCase):
 
     def test_dh_network_packets(self):
