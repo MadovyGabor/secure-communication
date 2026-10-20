@@ -113,9 +113,11 @@ class Scenario:
         att.wait_for("Attacker Proxy started")
         return att
 
-    def client(self, name, port=None, secure=True):
+    def client(self, name, port=None, secure=True, username=None):
+        """Start a client; `name` selects its key files, `username` is what the chat shows."""
         port = self.port if port is None else port
-        cl = self.start("client", "127.0.0.1", port, name, *([] if secure else ["--unsecure"]))
+        cl = self.start("client", "127.0.0.1", port, name, *([] if secure else ["--unsecure"]),
+                        *([] if username is None else ["--name", username]))
         cl.wait_for("help")
         return cl
 
