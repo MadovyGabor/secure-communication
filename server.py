@@ -3,14 +3,32 @@
 Clients are shown in the chat by username ("[Alice]: hi"), never by their TCP port. The username
 arrives in the first encrypted frame after the key exchange; a client without a usable name gets
 a sequential "Anonymous#N".
+
+Server events go through the `logging` module as "[YYYY-MM-DD HH:MM:SS] LEVEL - message".
+main.py calls configure_logging() in server mode only, so importing this module (the client, the
+attacker and the tests all do) leaves logging untouched.
 """
+import logging
 import socket
+import sys
 
 import networkstack
 import protocol
 from diffieHellman import DHNetwork
 from networkservice import NetworkService
 from RSA import RSA_Main
+
+LOG_FORMAT = "[%(asctime)s] %(levelname)s - %(message)s"
+LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+log = logging.getLogger(__name__)
+
+
+def configure_logging(stream=None, level=logging.INFO):
+    """Send log records of this process to `stream` (default stdout) in the audit log format."""
+    logging.basicConfig(level=level, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT,
+                        stream=stream or sys.stdout, force=True)
+
 
 class Server(NetworkService):
     """Chat server: keeps RSA and AES keys per client and forwards each message to the other clients."""
@@ -37,7 +55,7 @@ class Server(NetworkService):
         self.anonymous_count = 0
         self.my_rsa_pub, self.my_rsa_priv = RSA_Main.load_or_create_keys("server_key.json")
 
-        print(f"[Server] Started listening on port {port}")
+        log.info("Started listening on port %d (%s mode)", port, "secure" if secure else "unsecure")
 
     def forget_client(self, port):
         # a later client reusing the port must not inherit keys of the previous one
@@ -55,7 +73,7 @@ class Server(NetworkService):
         try:
             self.handle_packet(sender, data)
         except Exception as e:
-            print(f"[Server] Error: dropping malformed packet from client {sender.port}: {e}")
+            log.error("Client %d: dropping malformed packet: %s", sender.port, e)
 
     def handle_packet(self, sender, data: bytes):
         message = protocol.decode_text(data)
@@ -73,12 +91,12 @@ class Server(NetworkService):
         if message is not None and message.startswith(protocol.RSA_AUTH):
             client_pub = self.client_rsa_keys.get(sender.port)
             if not client_pub:
-                print("[Server] Error: Client has not exchanged RSA keys yet.")
+                log.warning("Client %d: signed packet before the RSA key exchange, dropped", sender.port)
                 return
 
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, client_pub)
             if not is_valid:
-                print("[Security] HACKER DETECTED! Signature invalid. Dropping packet.")
+                log.warning("HACKER DETECTED! Client %d: invalid signature, packet dropped", sender.port)
                 return
 
             # If authentic
@@ -86,13 +104,13 @@ class Server(NetworkService):
                 self.respond_to_dh_init(sender, inner_message, sign=True)
                 return
 
-            print("[Server] Error: unsupported authenticated message.")
+            log.warning("Client %d: unsupported authenticated message, dropped", sender.port)
             return
 
         # 2.5 Unauthenticated Client Messages
         if message is not None and message.startswith(protocol.DH_INIT):
             if self.secure:
-                print("[Security] HACKER DETECTED! Dropping unauthenticated packet.")
+                log.warning("HACKER DETECTED! Client %d: unauthenticated DH_INIT in secure mode, packet dropped", sender.port)
                 return
 
             self.respond_to_dh_init(sender, message, sign=False)
@@ -107,7 +125,7 @@ class Server(NetworkService):
         try:
             plaintext = self.decrypt_and_decode(data, self.client_aes_keys[sender.port])
         except Exception as e:
-            print(f"[Security] Decryption failed: {e}")
+            log.warning("Client %d: decryption failed, frame dropped: %s", sender.port, e)
             return
 
         # the first frame after a key exchange names the client
@@ -143,7 +161,7 @@ class Server(NetworkService):
                 self.anonymous_count += 1
                 requested = f"{protocol.ANONYMOUS_PREFIX}{self.anonymous_count}"
             name = self.client_names[sender.port] = requested
-            print(f"[Server] Client joined the chat as {name}")
+            log.info("Client %d joined the chat as %s", sender.port, name)
 
         # a client that re-keys keeps the name it already has
         text = f"[Server]: {notice + ' ' if notice else ''}You are chatting as {name}."
