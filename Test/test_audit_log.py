@@ -6,6 +6,7 @@ import unittest
 
 import server
 from diffieHellman import DHNetwork
+from RSA import RSA_Main, RSA_Math
 from server import Server
 from Test.test_disconnect import InTempDir, frame, until
 from Test.test_naming import RawClient
@@ -90,8 +91,43 @@ class TestConnectionEvents(ServerLogCase):
             self.assertFalse(any(str(port) in line for line in self.lines))
 
 
+class TestRoutingEvents(ServerLogCase):
+
+    def test_broadcast_logs_route_but_not_content_or_keys(self):
+        alice, bob, carol = self.client(), self.client(), self.client()
+        for raw, name in ((alice, "Alice"), (bob, "Bob"), (carol, "Carol")):
+            raw.join(name)
+        alice.send_encrypted("top-secret-text")
+        bob.recv_text()
+        carol.recv_text()
+        self.assertLogged(r"^INFO - Alice -> broadcasted to 2 clients$")
+
+        log_text = "\n".join(self.lines)
+        self.assertNotIn("top-secret-text", log_text)
+        for key in self.server.client_aes_keys.values():
+            self.assertNotIn(key.hex()[:8], log_text)
+
+    def test_unauthenticated_session_is_logged(self):
+        self.client().join("Alice")
+        self.assertLogged(r"^INFO - AES session key established with conn#1 \(127\.0\.0\.1\) "
+                          r"\(unauthenticated Diffie-Hellman\)$")
+
+
 class TestSecureServerEvents(ServerLogCase):
     secure = True
+
+    def test_rsa_exchange_and_signed_session_are_logged(self):
+        raw = self.client()
+        public, private = RSA_Math.generate_rsa_parameters(512)
+        raw.sock.sendall(frame(RSA_Main.build_rsa_init_packet(public).encode("utf-8")))
+        raw.recv()  # server's RSA_INIT
+        self.assertLogged(r"^INFO - RSA public key exchange completed with conn#1 \(127\.0\.0\.1\)$")
+
+        dh_init, _, _, _ = DHNetwork.build_init_packet()
+        raw.sock.sendall(frame(RSA_Main.build_rsa_auth_packet(dh_init, private).encode("utf-8")))
+        raw.recv()  # signed DH_ACCEPT
+        self.assertLogged(r"^INFO - AES session key established with conn#1 \(127\.0\.0\.1\) "
+                          r"\(RSA-signed Diffie-Hellman\)$")
 
     def test_unauthenticated_dh_is_logged_as_warning(self):
         raw = self.client()

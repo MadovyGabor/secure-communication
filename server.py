@@ -103,6 +103,7 @@ class Server(NetworkService):
 
             packet = RSA_Main.build_rsa_init_packet(self.my_rsa_pub)
             sender.send(packet.encode("utf-8"))
+            log.info("RSA public key exchange completed with %s", self.who(sender.port))
             return
 
         # 2. authenticated Client Messages
@@ -157,15 +158,19 @@ class Server(NetworkService):
             self.assign_name(sender, None)  # client sent chat without introducing itself
 
         name = self.client_names[sender.port]
-        print(f"[Message from {name}]: {plaintext}")
         out = f"[{name}]: {plaintext}".encode("utf-8")
 
+        recipients = 0
         for client_port in self.server_socket.clients:
             if (client_port != sender.port and client_port in self.client_aes_keys):
                 client_socket = self.server_socket.clients[client_port]
                 client_aes_key = self.client_aes_keys[client_port]
-        
+
                 self.send_encrypted_to_client(client_socket, out, client_aes_key)
+                recipients += 1
+
+        # routing only: the audit log never contains message content
+        log.info("%s -> broadcasted to %d client%s", name, recipients, "" if recipients == 1 else "s")
     
     def assign_name(self, sender, requested):
         """Store the client's username (or a fresh Anonymous#N) and tell the client which one it got."""
@@ -196,8 +201,9 @@ class Server(NetworkService):
             dh_reply_packet = RSA_Main.build_rsa_auth_packet(dh_reply_packet, self.my_rsa_priv)
         sender.send(dh_reply_packet.encode("utf-8"))
 
-        print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
-        print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
+        # never log key material, not even a prefix of it
+        log.info("AES session key established with %s (%s Diffie-Hellman)",
+                 self.who(sender.port), "RSA-signed" if sign else "unauthenticated")
 
     # helper function for encrypting data and sending it to a client
     def send_encrypted_to_client(self, client_socket, data: bytes, secret: bytes, handler = None, handler_args = ()):
