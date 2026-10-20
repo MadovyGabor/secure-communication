@@ -1,4 +1,9 @@
-"""Chat server: authenticates clients, answers the Diffie-Hellman handshake and relays encrypted chat."""
+"""Chat server: authenticates clients, answers the Diffie-Hellman handshake and relays encrypted chat.
+
+Clients are shown in the chat by username ("[Alice]: hi"), never by their TCP port. The username
+arrives in the first encrypted frame after the key exchange; a client without a usable name gets
+a sequential "Anonymous#N".
+"""
 import socket
 
 import networkstack
@@ -25,6 +30,11 @@ class Server(NetworkService):
 
         # RSA handling
         self.client_rsa_keys = {}
+
+        # naming: port -> username; ports whose next encrypted frame should be a NAME packet
+        self.client_names = {}
+        self.awaiting_name = set()
+        self.anonymous_count = 0
         self.my_rsa_pub, self.my_rsa_priv = RSA_Main.load_or_create_keys("server_key.json")
 
         print(f"[Server] Started listening on port {port}")
@@ -34,6 +44,8 @@ class Server(NetworkService):
         self.client_aes_keys.pop(port, None)
         self.client_raw_dh_secrets.pop(port, None)
         self.client_rsa_keys.pop(port, None)
+        self.client_names.pop(port, None)
+        self.awaiting_name.discard(port)
 
     def loop(self):
         while True:
@@ -94,12 +106,22 @@ class Server(NetworkService):
         # decrypt the incoming message
         try:
             plaintext = self.decrypt_and_decode(data, self.client_aes_keys[sender.port])
-            print(f"[Message from Client {sender.port}]: {plaintext}")
         except Exception as e:
             print(f"[Security] Decryption failed: {e}")
             return
-        
-        out = "{}: {}".format(sender.port, plaintext).encode("utf-8")
+
+        # the first frame after a key exchange names the client
+        if sender.port in self.awaiting_name:
+            self.awaiting_name.discard(sender.port)
+            if plaintext.startswith(protocol.NAME):
+                self.assign_name(sender, protocol.parse_name(plaintext))
+                return
+        if sender.port not in self.client_names:
+            self.assign_name(sender, None)  # client sent chat without introducing itself
+
+        name = self.client_names[sender.port]
+        print(f"[Message from {name}]: {plaintext}")
+        out = f"[{name}]: {plaintext}".encode("utf-8")
 
         for client_port in self.server_socket.clients:
             if (client_port != sender.port and client_port in self.client_aes_keys):
@@ -108,10 +130,30 @@ class Server(NetworkService):
         
                 self.send_encrypted_to_client(client_socket, out, client_aes_key)
     
+    def assign_name(self, sender, requested):
+        """Store the client's username (or a fresh Anonymous#N) and tell the client which one it got."""
+        name = self.client_names.get(sender.port)
+        notice = None
+        if name is None:
+            taken = {n.lower() for n in self.client_names.values()}
+            if requested is not None and requested.lower() in taken:
+                notice = f"The name '{requested}' is already taken."
+                requested = None
+            if requested is None:
+                self.anonymous_count += 1
+                requested = f"{protocol.ANONYMOUS_PREFIX}{self.anonymous_count}"
+            name = self.client_names[sender.port] = requested
+            print(f"[Server] Client joined the chat as {name}")
+
+        # a client that re-keys keeps the name it already has
+        text = f"[Server]: {notice + ' ' if notice else ''}You are chatting as {name}."
+        self.send_encrypted_to_client(sender, text.encode("utf-8"), self.client_aes_keys[sender.port])
+
     def respond_to_dh_init(self, sender, dh_init: str, sign: bool):
         dh_reply_packet, raw_dh_secret, aes_session_key = DHNetwork.process_init_packet(dh_init)
         self.client_raw_dh_secrets[sender.port] = raw_dh_secret
         self.client_aes_keys[sender.port] = aes_session_key
+        self.awaiting_name.add(sender.port)
 
         if sign:
             dh_reply_packet = RSA_Main.build_rsa_auth_packet(dh_reply_packet, self.my_rsa_priv)
