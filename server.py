@@ -40,7 +40,12 @@ class Server(NetworkService):
         self.socket.bind((host, port))
         self.socket.listen(1)
         
-        self.server_socket = networkstack.ServerSocket(self.socket, on_disconnect=self.forget_client)
+        self.server_socket = networkstack.ServerSocket(self.socket, on_disconnect=self.forget_client,
+                                                       on_connect=self.register_connection)
+
+        # audit log identity: port -> ("conn#N", client IP)
+        self.connections = {}
+        self.connection_count = 0
 
         #DH handling: port -> keys
         self.client_aes_keys = {}
@@ -57,7 +62,20 @@ class Server(NetworkService):
 
         log.info("Started listening on port %d (%s mode)", port, "secure" if secure else "unsecure")
 
+    def register_connection(self, port, address):
+        self.connection_count += 1
+        self.connections[port] = (f"conn#{self.connection_count}", address[0])
+        log.info("Client connected: %s", self.who(port))
+
+    def who(self, port):
+        """Audit log label of a client: "Alice (conn#3, 10.0.0.5)" or "conn#3 (10.0.0.5)" before it has a name."""
+        conn_id, ip = self.connections.get(port, ("conn#?", "unknown IP"))
+        name = self.client_names.get(port)
+        return f"{name} ({conn_id}, {ip})" if name else f"{conn_id} ({ip})"
+
     def forget_client(self, port):
+        log.info("Client disconnected: %s", self.who(port))
+        self.connections.pop(port, None)
         # a later client reusing the port must not inherit keys of the previous one
         self.client_aes_keys.pop(port, None)
         self.client_raw_dh_secrets.pop(port, None)
@@ -73,7 +91,7 @@ class Server(NetworkService):
         try:
             self.handle_packet(sender, data)
         except Exception as e:
-            log.error("Client %d: dropping malformed packet: %s", sender.port, e)
+            log.error("%s: dropping malformed packet: %s", self.who(sender.port), e)
 
     def handle_packet(self, sender, data: bytes):
         message = protocol.decode_text(data)
@@ -91,12 +109,12 @@ class Server(NetworkService):
         if message is not None and message.startswith(protocol.RSA_AUTH):
             client_pub = self.client_rsa_keys.get(sender.port)
             if not client_pub:
-                log.warning("Client %d: signed packet before the RSA key exchange, dropped", sender.port)
+                log.warning("%s: signed packet before the RSA key exchange, dropped", self.who(sender.port))
                 return
 
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, client_pub)
             if not is_valid:
-                log.warning("HACKER DETECTED! Client %d: invalid signature, packet dropped", sender.port)
+                log.warning("HACKER DETECTED! %s: invalid signature, packet dropped", self.who(sender.port))
                 return
 
             # If authentic
@@ -104,13 +122,14 @@ class Server(NetworkService):
                 self.respond_to_dh_init(sender, inner_message, sign=True)
                 return
 
-            log.warning("Client %d: unsupported authenticated message, dropped", sender.port)
+            log.warning("%s: unsupported authenticated message, dropped", self.who(sender.port))
             return
 
         # 2.5 Unauthenticated Client Messages
         if message is not None and message.startswith(protocol.DH_INIT):
             if self.secure:
-                log.warning("HACKER DETECTED! Client %d: unauthenticated DH_INIT in secure mode, packet dropped", sender.port)
+                log.warning("HACKER DETECTED! %s: unauthenticated DH_INIT in secure mode, packet dropped",
+                            self.who(sender.port))
                 return
 
             self.respond_to_dh_init(sender, message, sign=False)
@@ -125,7 +144,7 @@ class Server(NetworkService):
         try:
             plaintext = self.decrypt_and_decode(data, self.client_aes_keys[sender.port])
         except Exception as e:
-            log.warning("Client %d: decryption failed, frame dropped: %s", sender.port, e)
+            log.warning("%s: decryption failed, frame dropped: %s", self.who(sender.port), e)
             return
 
         # the first frame after a key exchange names the client
@@ -160,8 +179,8 @@ class Server(NetworkService):
             if requested is None:
                 self.anonymous_count += 1
                 requested = f"{protocol.ANONYMOUS_PREFIX}{self.anonymous_count}"
+            log.info("%s joined the chat as %s", self.who(sender.port), requested)
             name = self.client_names[sender.port] = requested
-            log.info("Client %d joined the chat as %s", sender.port, name)
 
         # a client that re-keys keeps the name it already has
         text = f"[Server]: {notice + ' ' if notice else ''}You are chatting as {name}."

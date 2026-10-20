@@ -69,6 +69,27 @@ class TestServerEvents(ServerLogCase):
         self.assertLogged(r"^ERROR - .*dropping malformed packet")
 
 
+class TestConnectionEvents(ServerLogCase):
+
+    def test_connect_join_and_disconnect_are_logged_with_ip(self):
+        alice = self.client()
+        self.assertLogged(r"^INFO - Client connected: conn#1 \(127\.0\.0\.1\)$")
+        alice.join("Alice")
+        self.assertLogged(r"^INFO - conn#1 \(127\.0\.0\.1\) joined the chat as Alice$")
+
+        alice.sock.close()
+        self.sockets.remove(alice.sock)
+        self.assertTrue(until(lambda: alice.port not in self.server.connections, alice.step))
+        self.assertLogged(r"^INFO - Client disconnected: Alice \(conn#1, 127\.0\.0\.1\)$")
+
+    def test_connections_are_numbered_and_ports_are_not_logged(self):
+        first, second = self.client(), self.client()
+        self.assertLogged(r"Client connected: conn#1 ")
+        self.assertLogged(r"Client connected: conn#2 ")
+        for port in (first.port, second.port):
+            self.assertFalse(any(str(port) in line for line in self.lines))
+
+
 class TestSecureServerEvents(ServerLogCase):
     secure = True
 

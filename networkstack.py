@@ -1,7 +1,10 @@
 """TCP transport with 4-byte length-prefixed frames, driven by select()."""
+import logging
 import select
 
 MSG_PREFIX_SIZE = 4
+
+log = logging.getLogger(__name__)
 
 class SendState():
     """An outgoing frame and the part of it that is not sent yet."""
@@ -118,10 +121,11 @@ class ClientSocket():
 class ServerSocket():
     """Listening socket that accepts clients and serves all connections with select()."""
 
-    def __init__(self, server_socket, on_disconnect = None):
+    def __init__(self, server_socket, on_disconnect = None, on_connect = None):
         self.server_socket = server_socket
         self.clients = {}
         self.on_disconnect = on_disconnect # called with the client's port
+        self.on_connect = on_connect # called with the client's port and (ip, port) address
 
     # blocks until a socket is readable, queued data can be written, or timeout (seconds)
     def process(self, recv_handler, recv_handler_args = (), timeout = 60):
@@ -161,7 +165,7 @@ class ServerSocket():
                 disconnected.add(port)
 
         for port in disconnected:
-            print("client", port, "disconnected")
+            log.debug("client %d disconnected", port)
             self.clients.pop(port).shutdown()
             if(self.on_disconnect is not None):
                 self.on_disconnect(port)
@@ -171,18 +175,20 @@ class ServerSocket():
             conn, address = self.server_socket.accept()
             port = conn.getpeername()[1]
         except OSError as e:
-            print("failed to accept connection:", e)
+            log.warning("failed to accept connection: %s", e)
             return
 
         if(port in self.clients):
-            print("rejected connection from", address, "- port", port, "already in use by another client")
+            log.warning("rejected connection from %s: port %d already in use by another client", address[0], port)
             conn.close()
             return
 
         client = ClientSocket(conn)
         self.clients[port] = client
         client.send(b"welcome to the server")
-        print("client", port, "connected")
+        log.debug("client %d connected", port)
+        if(self.on_connect is not None):
+            self.on_connect(port, address)
 
     def shutdown(self):
         for client in self.clients.values():
