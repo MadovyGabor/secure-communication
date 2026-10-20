@@ -111,7 +111,8 @@ The three most critical bugs I fixed:
 
 The remaining fixes cover framing errors, locks that were never released, network threads that
 crashed on malformed or tampered packets, keys and relays left behind after disconnects, a weak
-Diffie-Hellman group an attacker could force, and flaky tests.
+Diffie-Hellman group an attacker could force, and flaky tests. The full list of all 21 bugs, with
+root causes, fix commits and the tests that cover them, is in [FIXED_BUGS.md](FIXED_BUGS.md).
 
 ## Requirements
 
