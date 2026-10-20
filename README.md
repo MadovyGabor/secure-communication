@@ -1,40 +1,32 @@
-# Secure Chat (Zabezpečená komunikace)
+# Secure Communication
 
-A small group-chat program used as a cryptography playground: clients connect to a server and chat,
-and a built-in man-in-the-middle (MITM) proxy shows what the protection does and does not stop.
+[![CI](https://github.com/MadovyGabor/secure-comunication/actions/workflows/ci.yml/badge.svg)](https://github.com/MadovyGabor/secure-comunication/actions/workflows/ci.yml)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3130/)
+[![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](#docker--demo-scenarios)
+[![Tests](https://img.shields.io/badge/tests-103-success?logo=pytest&logoColor=white)](#tests--ci)
+[![Crypto](https://img.shields.io/badge/crypto-RSA%20%7C%20Diffie--Hellman%20%7C%20AES--GCM-blueviolet)](#how-it-works)
+[![Last commit](https://img.shields.io/github/last-commit/MadovyGabor/secure-comunication)](https://github.com/MadovyGabor/secure-comunication/commits/main)
 
-Authors: Gabriel Madový (283573), Petr Věříš (283559), Oliver Synak (281728), Donát Szabó (283384).
+## About the Project
+
+A small terminal-based group-chat program used as a cryptography playground: clients connect to a
+server and chat with end-to-end encryption (E2EE), and a built-in man-in-the-middle (MITM) proxy
+shows what the protection does and does not stop.
+
 Course project for BPC-AKR (Applied Cryptography), FEKT VUT, 2025/2026.
 
-## Quick start
+## Team Roles
 
-```bash
-pip install -r requirements.txt
-```
+This project started as a four-person university assignment where every team member built a
+specific part of the system:
 
-Then, each in its own terminal from the repository root:
+- **Gabriel Madový:** Diffie-Hellman key exchange and HKDF key derivation (`diffieHellman/`).
+- **Petr Věříš:** TCP network stack, length-prefixed framing, and the client, server and MITM proxy
+  architecture (`networkstack.py`, `networkservice.py`).
+- **Donát Szabó:** RSA key generation, signing, verification and JSON key storage (`RSA/`).
+- **Oliver Synak:** Symmetric encryption with a custom AES-GCM implementation (`GCM/`).
 
-```bash
-python main.py server 127.0.0.1 8000
-```
-
-```bash
-python main.py client 127.0.0.1 8000 Alice
-```
-
-```bash
-python main.py attack 127.0.0.1 8000
-```
-
-Run the tests:
-
-```bash
-python -m unittest discover -s Test -t .
-```
-
-Details for each step follow below.
-
-## How the protocol works
+## How It Works
 
 | Layer | What the code does |
 |---|---|
@@ -71,6 +63,57 @@ DH_ACCEPT:<B>                    Diffie-Hellman answer
 NAME:<username>                  first encrypted message after each DH exchange (empty = anonymous)
 ```
 
+### Project layout
+
+```
+main.py               command-line entry point
+client.py             chat client
+server.py             chat server
+attacker.py           MITM proxy
+networkservice.py     shared base class and AES-GCM message helpers
+networkstack.py       length-prefixed TCP framing
+protocol.py           packet formats
+RSA/                  RSA key generation, signing and key files
+diffieHellman/        Diffie-Hellman and HKDF
+GCM/                  AES-GCM implementation
+Test/                 unit and end-to-end tests
+Dockerfile            container image for all three roles
+docker-compose.yml    server, attacker and two client services
+.github/workflows/ci.yml   GitHub Actions workflow that runs the tests
+requirements.txt      Python dependencies
+```
+
+## Post-Project Refactoring & Bug Fixes (by Gabriel Madový)
+
+After our team finished the university course, I took the codebase to clean it up and turn it into a
+reliable project. With the help of AI tools, I reviewed the entire repository, refactored its
+structure, and fixed 21 bugs across the networking and cryptography layers.
+I built a suite of more than 100 unit and end-to-end tests that run all four demo scenarios
+automatically, added a GitHub Actions CI pipeline, and created the Docker and Docker Compose setup so
+anyone can run the server, the MITM proxy and two clients in isolated containers. Later I added
+usernames instead of TCP ports in the chat, and a structured audit log on the server.
+
+The three most critical bugs I fixed:
+
+- **The server used 100% CPU while idle.** On every loop the server handed every client socket to
+  `select` as "writable", even when it had nothing to send. A connected socket is almost always
+  writable, so `select` returned immediately and the loop spun without ever waiting. The server now
+  asks for writability only when a client has queued data, so an idle server sleeps in `select`.
+- **In secure mode the client accepted an unsigned `DH_ACCEPT`.** The client processed the server's
+  Diffie-Hellman answer whether or not it arrived inside a valid RSA signature. A MITM attacker could
+  send its own unsigned `DH_ACCEPT` and silently take over the session, defeating the whole point of
+  secure mode. The client now rejects any `DH_ACCEPT` in secure mode that is not signed by the
+  server's key.
+- **Chat messages were sent in plaintext before the session key existed.** If the user typed a message
+  before finishing the key exchange, the client fell back to sending it unencrypted, so anyone on the
+  network could read it. In secure mode the client now refuses to send chat until the AES session key
+  is established.
+
+The remaining fixes cover framing errors, locks that were never released, network threads that
+crashed on malformed or tampered packets, keys and relays left behind after disconnects, a weak
+Diffie-Hellman group an attacker could force, and flaky tests. The full list of all 21 bugs, with
+root causes, fix commits and the tests that cover them, is in [FIXED_BUGS.md](FIXED_BUGS.md).
+
 ## Requirements
 
 - Python 3.13 (the version the tests were run with)
@@ -86,7 +129,7 @@ Activate it (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` on
 pip install -r requirements.txt
 ```
 
-## Running the demo
+## Running Manually (Local)
 
 Start each role in its own terminal, from the repository root.
 
@@ -111,7 +154,7 @@ python main.py client 127.0.0.1 8000 Alice
 ```
 
 ```bash
-python main.py client 127.0.0.1 8001 bob
+python main.py client 127.0.0.1 8001 Bob
 ```
 
 Add `--unsecure` to the server, proxy and client commands for unsecure mode (it may appear anywhere
@@ -137,20 +180,22 @@ on the command line). Run `python main.py -h` for the full usage.
 | `help` | List the commands |
 | `exit` | Stop the proxy |
 
-Stop the server with Ctrl+C. Ctrl+C also stops a client or the proxy.
+Stop the server with Ctrl+C. Ctrl+C also stops a client or the proxy. Console output of the program
+is partly in Czech.
 
-### The four demo scenarios
+### Key files
 
-| Scenario | Steps | Expected outcome |
-|---|---|---|
-| Secure chat | server; two clients on port 8000; each runs `rsa`, then `dh`; one sends a message | The sender gets `[Server]: You are chatting as <name>.` after `dh`; the other client prints `[Message from Server]: [<name>]: <message>` |
-| Unsecure chat | as above with `--unsecure` everywhere and without `rsa` | The message is delivered |
-| MITM, unsecure | server and proxy with `--unsecure`; proxy `attack`; two clients on port 8001 with `--unsecure` run `dh` and chat | The message is delivered, and the proxy prints `[MITM] Extracted Username: <name>` and `[MITM] Extracted Plaintext: <message>` |
-| MITM, secure | server and proxy in secure mode; proxy `attack`; two clients on port 8001 run `rsa`, then `dh` | The server prints `[Security] HACKER DETECTED! Signature invalid. Dropping packet.`, no session key is derived, and no chat message gets through |
+Keys are stored as JSON in the **current working directory**:
 
-Console output of the program is partly in Czech.
+| File | Content |
+|---|---|
+| `server_key.json` | The server's RSA key pair, created on first start |
+| `<name>_client_key.json` | The client's RSA key pair, created on the first `rsa` (`default_` for an anonymous client) |
+| `<name>_server_key.json` | The server public key the client saw first. A different key later is reported as a possible attack and rejected (trust on first use). |
 
-## Docker
+Private keys are stored unencrypted. The `.gitignore` excludes `*.json`, so never commit them.
+
+## Docker & Demo Scenarios
 
 `Dockerfile` and `docker-compose.yml` start the whole demo (server, MITM proxy and two clients) with
 one command:
@@ -204,19 +249,16 @@ the key volumes too.
 
 The image runs as a non-root user, and `.dockerignore` keeps key files out of the build context.
 
-## Key files
+### The four demo scenarios
 
-Keys are stored as JSON in the **current working directory**:
+| Scenario | Steps | Expected outcome |
+|---|---|---|
+| Secure chat | server; two clients on port 8000; each runs `rsa`, then `dh`; one sends a message | The sender gets `[Server]: You are chatting as <name>.` after `dh`; the other client prints `[Message from Server]: [<name>]: <message>` |
+| Unsecure chat | as above with `--unsecure` everywhere and without `rsa` | The message is delivered |
+| MITM, unsecure | server and proxy with `--unsecure`; proxy `attack`; two clients on port 8001 with `--unsecure` run `dh` and chat | The message is delivered, and the proxy prints `[MITM] Extracted Username: <name>` and `[MITM] Extracted Plaintext: <message>` |
+| MITM, secure | server and proxy in secure mode; proxy `attack`; two clients on port 8001 run `rsa`, then `dh` | The server logs `WARNING - HACKER DETECTED! <client>: invalid signature, packet dropped`, no session key is derived, and no chat message gets through |
 
-| File | Content |
-|---|---|
-| `server_key.json` | The server's RSA key pair, created on first start |
-| `<name>_client_key.json` | The client's RSA key pair, created on the first `rsa` (`default_` for an anonymous client) |
-| `<name>_server_key.json` | The server public key the client saw first. A different key later is reported as a possible attack and rejected (trust on first use). |
-
-Private keys are stored unencrypted. The `.gitignore` excludes `*.json`, so never commit them.
-
-## Server audit log
+### Server audit log
 
 The server logs its events through Python's `logging` module to stdout (so `docker compose logs server`
 shows them too), in the format `[YYYY-MM-DD HH:MM:SS] LEVEL - message`:
@@ -232,78 +274,24 @@ shows them too), in the format `[YYYY-MM-DD HH:MM:SS] LEVEL - message`:
 
 Each connection is labelled `conn#N` with the client's IP, plus the username once the client has
 one; TCP ports are not logged. Security events (`HACKER DETECTED`, failed decryption) are `WARNING`,
-malformed packets are `ERROR`. The log never contains chat text or key material. Logging is set up
-by `server.configure_logging()`, which `main.py` calls in server mode only.
+malformed packets are `ERROR`. The log never contains chat text or key material.
 
-## Tests
+## Tests & CI
 
 ```bash
 python -m unittest discover -s Test -t .
 ```
 
 The suite has 103 tests: unit tests for framing, packet formats, AES-GCM (including known-answer
-vectors), RSA keys, Diffie-Hellman, the CLI, error handling, the secure-mode rules, usernames
-(`test_naming.py`) and the server audit log (`test_audit_log.py`), plus end-to-end tests that start the server, proxy and clients as subprocesses and
+vectors), RSA keys, Diffie-Hellman, the CLI, error handling, the secure-mode rules, usernames and the
+server audit log, plus end-to-end tests that start the server, proxy and clients as subprocesses and
 run the demo scenarios on localhost. A full run takes about a minute.
-
-## CI
-
-[![CI](https://github.com/MadovyGabor/secure-comunication/actions/workflows/ci.yml/badge.svg)](https://github.com/MadovyGabor/secure-comunication/actions/workflows/ci.yml)
 
 The GitHub Actions workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push
 to `main` and on every pull request to `main`. It installs `requirements.txt` on `ubuntu-latest` with
-Python 3.13 and runs `python -m unittest discover -s Test -t .`.
+Python 3.13 and runs the same command.
 
-## Project layout
-
-```
-main.py               command-line entry point
-client.py             chat client
-server.py             chat server
-attacker.py           MITM proxy
-networkservice.py     shared base class and AES-GCM message helpers
-networkstack.py       length-prefixed TCP framing
-protocol.py           packet formats
-RSA/                  RSA key generation, signing and key files
-diffieHellman/        Diffie-Hellman and HKDF
-GCM/                  AES-GCM implementation
-Test/                 unit and end-to-end tests
-Dockerfile            container image for all three roles
-docker-compose.yml    server, attacker and client services
-.github/workflows/ci.yml   GitHub Actions workflow that runs the tests
-requirements.txt      Python dependencies
-```
-
-## Bugs found and fixed
-
-Found while refactoring the original code (see `git log main`). Root cause line numbers refer to the
-file as it was just before the fix commit. Test names are classes and methods in `Test/`.
-
-| ID | Symptom | Root cause (file:line) | Fix | Test that covers it |
-|---|---|---|---|---|
-| B1 | Ctrl+C did not shut the service down | `main.py:9` assigned a local `service`; the handler at `main.py:37` read the global, which stayed `None` | `7be2038` | `test_cli.TestRun.test_keyboard_interrupt_shuts_service_down` |
-| B2 | Missing or invalid arguments exited silently with status 0 | `main.py:15-16`, `main.py:20-21`: bare `exit()` | `7be2038` | `test_cli.TestParseArgs.test_invalid_arguments_exit_with_usage` |
-| B3 | Server shutdown raised `AttributeError` | `networkstack.py:167` iterated the client dict's keys (ports) and called `.shutdown()` on them | `b0c64b2` | `test_networkstack.TestServerSocket.test_shutdown_closes_all_clients` |
-| B4 | A second client with an already registered peer port leaked its socket and ended the select round | `networkstack.py:144-145` returned without closing the accepted connection | `b0c64b2` | no test |
-| B5 | One malformed packet (e.g. `RSA_INIT:x`) crashed the server | `networkstack.py:164` caught only `OSError`; parse errors from `Server.receive_handler` (`networkservice.py:232`) escaped | `7edebd5` | `test_error_handling.TestServerSurvivesMalformedPackets.test_secure_server`, `test_unsecure_server` |
-| B6 | After a bad packet the client's `exit` command hung | `networkservice.py:137` acquired the lock without `try/finally`; an exception killed the thread with the lock held | `7edebd5` | `test_error_handling.TestClientSurvivesMalformedPackets.test_network_thread_survives_and_releases_lock` |
-| B7 | A tampered encrypted frame killed the client's network thread | `networkservice.py:198` did not catch the GCM authentication error | `7edebd5` | `test_error_handling.TestClientSurvivesMalformedPackets.test_tampered_ciphertext_is_dropped` |
-| B8 | A `DH_ACCEPT` without a pending exchange raised `TypeError` | `networkservice.py:191` used `self.p`, which is `None` before `dh` | `7edebd5` | `test_error_handling.TestClientSurvivesMalformedPackets.test_stray_dh_accept_is_ignored` |
-| B9 | After a client reset its connection, the server stopped accepting new clients | `networkstack.py:87` raised `ConnectionResetError`, the liveness check at `networkstack.py:122` still passed, and `networkstack.py:164` aborted every select round | `7edebd5` | `test_networkstack.TestServerSocket.test_reset_client_is_dropped_and_others_still_accepted` |
-| B10 | A corrupted key file crashed with a raw traceback | `RSA/RSA_Math.py:69-74` read the JSON fields unguarded | `7edebd5` | `test_rsa_keys.TestRsaKeyFiles.test_corrupted_key_file_raises_value_error` |
-| B11 | In secure mode the client accepted an unsigned `DH_ACCEPT` | `networkservice.py:203` handled `DH_ACCEPT` whether or not it came inside a valid `RSA_AUTH` | `db3c014` | `test_secure_mode.TestSecureClient.test_unsigned_dh_accept_is_rejected` |
-| B12 | In secure mode chat was sent in plaintext before a session key existed | `networkservice.py:134-136` fell back to an unencrypted send | `db3c014` | `test_secure_mode.TestSecureClient.test_chat_without_session_key_is_not_sent` |
-| B13 | The initiator could force a weak Diffie-Hellman group | `diffieHellman/DHNetwork.py:34-36` used `p` and `g` from the packet without checking them | `db3c014` | `test_secure_mode.TestDHGroupEnforcement.test_non_standard_group_is_rejected` |
-| B14 | The server kept a client's keys after it disconnected | `networkservice.py:249-253`: the per-port key maps were never cleared | `cb6cefd` | `test_disconnect.TestServerForgetsClient.test_keys_are_released_on_disconnect` |
-| B15 | The proxy kept a relay and its upstream connection after the victim left | `networkservice.py:458` created relays, which were only removed at `networkservice.py:444` when the server side closed | `cb6cefd` | `test_disconnect.TestAttackerDropsRelay.test_relay_closed_when_victim_disconnects` |
-| B16 | The server used 100% CPU while idle | `networkstack.py:128` passed every client to `select` as writable, so it returned at once | `ceabd7c` | `test_networkstack.TestServerSocket.test_idle_process_blocks_until_timeout` |
-| B17 | A payload of exactly 2^32 bytes raised `OverflowError` | `networkstack.py:30` checked `>` instead of `>=` | `ceabd7c` | `test_networkstack.TestClientSocketFraming.test_send_rejects_oversized_payload` |
-| B18 | The DH robustness script always reported FAIL and exited with 0 | `Test/test_dh_robustness.py:26` unpacked three return values into two names; `:34` compared a tuple to bytes | `a36946d` | `test_dh_robustness.TestDHRobustness.test_successful_signed_handshake` |
-| B19 | The framing tests failed on Linux | `Test/test_networkstack.py:12` used `socket.socketpair()`, which is AF_UNIX on Linux and has no peer port | `4370052` | the `test_networkstack.TestClientSocketFraming` tests, run on Linux in CI |
-| B20 | End-to-end tests failed intermittently with `WinError 10013` | `Test/harness.py:18` picked test ports with `bind(0)` from the ephemeral range | `dabbfc0` | no test |
-| B21 | `.dockerignore` did not exclude nested files such as `RSA/__pycache__` | `.dockerignore:2-6`: patterns without `**/` only match at the context root | `5845077` | no test |
-
-## Known limitations
+## Known Limitations
 
 - Textbook RSA signatures with 1024-bit keys, and no replay protection. Fine for teaching, not for
   real use.
@@ -312,30 +300,3 @@ file as it was just before the fix commit. Test names are classes and methods in
 - The server does not tie a username to the client's RSA key or remember it between sessions: any
   client can take a name that is free at the moment. All anonymous clients on one machine share the
   `default_*` key files.
-
-## Team Roles and My Post-Project Refactoring
-
-This project started as a four-person university assignment where every team member built a specific part of the system.
-
-**Original Team Breakdown:**
-* **Gabriel Madový (me):** Diffie-Hellman key exchange and HKDF key derivation (`diffieHellman/`).
-* **Petr Věříš:** TCP network stack, length-prefixed framing, and the client, server, and MITM proxy architecture (`networkstack.py`, `networkservice.py`).
-* **Donát Szabó:** RSA key generation, signing, verification, and JSON key storage (`RSA/`).
-* **Oliver Synak:** Symmetric encryption using a custom AES-GCM implementation (`GCM/`).
-
-**My Standalone Improvements and Bug Fixes:**
-After our team finished the university course, I took the codebase to clean it up and turn it into a reliable project. With the help of AI tools, I reviewed the entire repository, refactored the structure, and fixed 21 bugs across the networking and cryptography layers.
-
-In the original version, the server used 100% CPU while idle because `select` checked every client socket as writable on each loop. A single malformed packet or a connection reset from a client crashed the server or stopped it from accepting new connections. On the client side, an error during packet processing left a thread lock acquired, which caused the `exit` command to hang. Disconnecting clients also left stale keys on the server and open relay connections on the MITM proxy.
-
-I also fixed several critical security flaws in the protocol logic. Originally, the client accepted unsigned `DH_ACCEPT` packets even in secure mode, and it sent chat messages in plaintext if the user typed before running the key exchange. The Diffie-Hellman handler also accepted any `p` and `g` parameters sent over the network, which allowed an attacker to force a weak group. I updated the code to enforce valid signatures, block unencrypted messages in secure mode, and strictly check the RFC 3526 MODP Group 14 parameters.
-
-To make sure everything works properly, I built a test suite of 70 unit and end-to-end tests that run all four demo scenarios automatically. I also added a GitHub Actions CI pipeline and created the Docker and Docker Compose setup so anyone can run the server, client, and MITM proxy in isolated containers without manual configuration.
-
-**My commit history on `main` (`git log --author="Gabriel Madový"`):**
-* **Refactoring and structure:** `c82124f`, `2976803`, `9fdd3d5`, `a2b06a2`, `7bf825b`
-* **CLI improvements:** `7be2038`
-* **Network and security bug fixes:** `b0c64b2`, `7edebd5`, `db3c014`, `cb6cefd`, `ceabd7c`
-* **Unit and end-to-end tests:** `7bb4ce5`, `a36946d`, `03c5fa7`, `4370052`, `dabbfc0`
-* **CI and Docker setup:** `a5b5efd`, `99c17c6`, `cc9ca6e`, `c06597a`, `5845077`, `08518a4`, `ff3dae0`
-* **Documentation:** `5508034`, `d7bbcf6`, `6e398ef`, `a2d62c4`, `5f5ff7b`
