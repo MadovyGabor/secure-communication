@@ -2,7 +2,10 @@
 import contextlib
 import unittest
 
+import os
+
 import protocol
+from attacker import Attacker
 from diffieHellman import DHNetwork
 from server import Server
 from Test.test_disconnect import InTempDir, frame, until
@@ -114,6 +117,31 @@ class TestServerNaming(InTempDir):
         self.assertTrue(until(lambda: alice.port not in self.server.client_names, alice.step))
         self.assertNotIn(alice.port, self.server.awaiting_name)
         self.assertEqual(self.client().join("Alice"), "[Server]: You are chatting as Alice.")
+
+
+class TestAttackerNameFrames(InTempDir):
+    """A pending tamper must hit the next chat message, not the username frame."""
+
+    def setUp(self):
+        super().setUp()
+        self.attacker = Attacker("127.0.0.1", self.port)
+        self.addCleanup(self.attacker.shutdown)
+        self.attacker.mitm_active = True
+        self.k_client, self.k_server = os.urandom(32), os.urandom(32)
+        self.attacker.relays[1234] = {"mitm_state": {"k_client": self.k_client, "k_server": self.k_server}}
+        self.addCleanup(self.attacker.relays.clear)  # fake relay has no sockets for shutdown()
+
+    def relay(self, text):
+        data = self.attacker.encrypt_payload(text.encode("utf-8"), self.k_client)
+        out = self.attacker.intercept(data, "CLIENT -> SERVER", 1234)
+        return self.attacker.decrypt_and_decode(out, self.k_server)
+
+    def test_name_frame_is_relayed_unchanged_and_tamper_stays_armed(self):
+        self.attacker.tamper_text = "forged"
+        self.assertEqual(self.relay("NAME:Alice"), "NAME:Alice")
+        self.assertIn("[MITM] Extracted Username: Alice", self.output.getvalue())
+        self.assertEqual(self.relay("original"), "forged")
+        self.assertIsNone(self.attacker.tamper_text)
 
 
 if __name__ == "__main__":
