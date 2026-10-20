@@ -83,7 +83,7 @@ docker-compose.yml    server, attacker and two client services
 requirements.txt      Python dependencies
 ```
 
-## My Post-Project Refactoring & Bug Fixes
+## Post-Project Refactoring & Bug Fixes (by Gabriel Madový)
 
 After our team finished the university course, I (Gabriel Madový) took the codebase to clean it up and
 turn it into a reliable project. With the help of AI tools, I reviewed the entire repository,
