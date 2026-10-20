@@ -7,8 +7,8 @@
 #            and the attacker proxy as "127.0.0.1:8001"
 #
 # Interact with a service:   docker attach secure-chat-client-1   (detach: Ctrl+P, Ctrl+Q)
-# MITM demo client:          docker compose run --rm client client 127.0.0.1 8001 victim --name Victim
-# Username:                  append "--name <username>" to a client command (default: Anonymous#N)
+# MITM demo client:          docker compose run --rm client client 127.0.0.1 8001 victim
+# The last client argument is the username (and key file prefix); leave it out to be Anonymous#N
 # Unsecure mode:             append "--unsecure" to the server, attacker and client commands
 
 name: secure-chat

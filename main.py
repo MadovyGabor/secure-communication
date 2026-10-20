@@ -19,15 +19,16 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("mode", choices=["server", "client", "attack"])
     parser.add_argument("host", help="server: address to listen on; client/attack: address to connect to")
     parser.add_argument("port", type=port_number, help="server: port to listen on; client/attack: port to connect to")
-    parser.add_argument("instance", nargs="?", default="default", help="client instance name (selects key files)")
-    parser.add_argument("--name", help="client: username shown in the chat (default: Anonymous#N assigned by the server)")
+    parser.add_argument("name", nargs="?", default=None,
+                        help="client: username shown in the chat, also names the key files "
+                             "(default: Anonymous#N assigned by the server, key files default_*)")
     parser.add_argument("--unsecure", dest="secure", action="store_false", help="disable RSA authentication")
     return parser.parse_args(argv)
 
 
 def build_service(args: argparse.Namespace):
     if args.mode == "client":
-        return client.Client(args.host, args.port, args.instance, secure=args.secure, name=args.name)
+        return client.Client(args.host, args.port, args.name, secure=args.secure)
     if args.mode == "server":
         return server.Server(args.host, args.port, secure=args.secure)
     return attacker.Attacker(args.host, args.port, secure=args.secure)

@@ -113,11 +113,11 @@ class Scenario:
         att.wait_for("Attacker Proxy started")
         return att
 
-    def client(self, name, port=None, secure=True, username=None):
-        """Start a client; `name` selects its key files, `username` is what the chat shows."""
+    def client(self, name=None, port=None, secure=True):
+        """Start a client; `name` is its username and key file prefix, None for an anonymous client."""
         port = self.port if port is None else port
-        cl = self.start("client", "127.0.0.1", port, name, *([] if secure else ["--unsecure"]),
-                        *([] if username is None else ["--name", username]))
+        cl = self.start("client", "127.0.0.1", port, *([] if name is None else [name]),
+                        *([] if secure else ["--unsecure"]))
         cl.wait_for("help")
         return cl
 
@@ -144,7 +144,7 @@ class LocalClient:
         self.output = io.StringIO()
         self.capture = lambda: contextlib.redirect_stdout(self.output)
         with self.capture():
-            self.client = client.Client(*self.listener.getsockname(), secure=secure, name=name)
+            self.client = client.Client(*self.listener.getsockname(), name, secure=secure)
         self.peer, _ = self.listener.accept()
 
     def feed(self, *packets):

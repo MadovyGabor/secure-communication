@@ -90,6 +90,9 @@ class TestSecureClient(ClientCase):
         self.assertNotIn(b"secret", frame)
         self.assertEqual(self.client.decrypt_payload(frame, self.client.aes_session_key), b"secret")
 
+    def test_anonymous_client_uses_default_key_files(self):
+        self.assertEqual(self.client.instance, "default")
+
     def test_anonymous_client_sends_empty_name_after_key_exchange(self):
         self.local.feed(self.signed_dh_accept())
         frame = self.sent_frame()
@@ -107,9 +110,12 @@ class TestClientName(ClientCase):
         self.assertEqual(self.client.decrypt_payload(frame, self.client.aes_session_key), b"NAME:Alice")
 
     def test_invalid_name_is_rejected_before_connecting(self):
-        for name in ["", "[Server]", "Anonymous#1", "x" * 33]:
+        for name in ["", "[Server]", "Anonymous#1", "x" * 33, "../evil", "Bob Smith"]:
             with self.subTest(name=name), self.assertRaises(ValueError):
-                client.Client("127.0.0.1", 1, name=name)
+                client.Client("127.0.0.1", 1, name)
+
+    def test_key_files_are_named_after_user(self):
+        self.assertEqual(self.client.instance, "Alice")
 
 
 class TestUnsecureClient(ClientCase):

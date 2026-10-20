@@ -10,17 +10,17 @@ class TestParseArgs(unittest.TestCase):
 
     def parse(self, line):
         args = main.parse_args(line.split())
-        return args.mode, args.host, args.port, args.instance, args.secure
+        return args.mode, args.host, args.port, args.name, args.secure
 
     def test_readme_commands(self):
         cases = {
-            "server 127.0.0.1 8000": ("server", "127.0.0.1", 8000, "default", True),
-            "server 127.0.0.1 8000 --unsecure": ("server", "127.0.0.1", 8000, "default", False),
-            "attack 127.0.0.1 8000": ("attack", "127.0.0.1", 8000, "default", True),
-            "attack 127.0.0.1 8000 --unsecure": ("attack", "127.0.0.1", 8000, "default", False),
-            "client 127.0.0.1 8000 klient1": ("client", "127.0.0.1", 8000, "klient1", True),
-            "client 127.0.0.1 8001 klient1 --unsecure": ("client", "127.0.0.1", 8001, "klient1", False),
-            "client 127.0.0.1 8000": ("client", "127.0.0.1", 8000, "default", True),
+            "server 127.0.0.1 8000": ("server", "127.0.0.1", 8000, None, True),
+            "server 127.0.0.1 8000 --unsecure": ("server", "127.0.0.1", 8000, None, False),
+            "attack 127.0.0.1 8000": ("attack", "127.0.0.1", 8000, None, True),
+            "attack 127.0.0.1 8000 --unsecure": ("attack", "127.0.0.1", 8000, None, False),
+            "client 127.0.0.1 8000 Alice": ("client", "127.0.0.1", 8000, "Alice", True),
+            "client 127.0.0.1 8001 Alice --unsecure": ("client", "127.0.0.1", 8001, "Alice", False),
+            "client 127.0.0.1 8000": ("client", "127.0.0.1", 8000, None, True),
         }
         for line, expected in cases.items():
             with self.subTest(line=line):
@@ -59,20 +59,17 @@ class TestRun(unittest.TestCase):
         args = main.parse_args(["client", "h", "1", "inst", "--unsecure"])
         with mock.patch("client.Client") as client:
             main.build_service(args)
-        client.assert_called_once_with("h", 1, "inst", secure=False, name=None)
+        client.assert_called_once_with("h", 1, "inst", secure=False)
 
-    def test_name_option(self):
-        args = main.parse_args(["client", "h", "1", "inst", "--name", "Bob Smith"])
-        self.assertEqual((args.instance, args.name), ("inst", "Bob Smith"))
-        self.assertIsNone(main.parse_args(["client", "h", "1"]).name)
+    def test_anonymous_client_dispatch(self):
         with mock.patch("client.Client") as client:
-            main.build_service(args)
-        client.assert_called_once_with("h", 1, "inst", secure=True, name="Bob Smith")
+            main.build_service(main.parse_args(["client", "h", "1"]))
+        client.assert_called_once_with("h", 1, None, secure=True)
 
     def test_main_rejects_invalid_name(self):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
-            self.assertEqual(main.main(["client", "127.0.0.1", "8000", "--name", "[Server]"]), 1)
+            self.assertEqual(main.main(["client", "127.0.0.1", "8000", "../evil"]), 1)
         self.assertIn("invalid username", stderr.getvalue())
 
 

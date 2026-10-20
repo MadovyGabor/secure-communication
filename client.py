@@ -12,18 +12,18 @@ from RSA import RSA_Math as RSA_Logic
 class Client(NetworkService):
     """Interactive chat client: reads commands from stdin and talks to the server on a network thread."""
 
-    def __init__(self, host : str, port : int, instance : str = "default", secure=False, name=None):
-        # None = let the server pick an Anonymous#N name; checked before any socket is opened
+    def __init__(self, host : str, port : int, name : str = None, secure=False):
+        # the username is shown in the chat and names the key files; None = let the server pick
+        # an Anonymous#N name and use the "default" key files. Checked before any socket is opened.
         self.name = None
         if name is not None:
             self.name = protocol.normalize_name(name)
             if self.name is None:
-                raise ValueError(f"invalid username {name!r} (1-{protocol.MAX_NAME_LENGTH} printable characters, "
-                                 f"no brackets, must not start with '{protocol.ANONYMOUS_PREFIX}')")
+                raise ValueError(f"invalid username {name!r} (1-{protocol.MAX_NAME_LENGTH} letters, digits, '_' or '-')")
+        self.instance = self.name or "default"
 
         super().__init__(host, port)
         self.secure = secure
-        self.instance = instance
         self.socket.connect((self.host, self.port))
         self.client_socket = networkstack.ClientSocket(self.socket)
 

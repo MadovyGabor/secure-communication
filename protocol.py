@@ -85,16 +85,15 @@ def parse_dh_accept(message: str) -> int:
 def normalize_name(name: str):
     """Return the username without surrounding whitespace, or None if it cannot be used.
 
-    Rejected names (the client then stays anonymous): empty, longer than MAX_NAME_LENGTH,
-    containing control characters or brackets (they would break the "[name]: text" format)
-    and names starting with ANONYMOUS_PREFIX, which is reserved for server-assigned names.
+    A username is 1 to MAX_NAME_LENGTH letters, digits, '_' or '-'. The client also uses it as
+    the prefix of its key files, so path characters must never get through, and brackets would
+    break the "[name]: text" chat format. The '#' of server-assigned "Anonymous#N" names is not
+    allowed either, so nobody can pose as an anonymous client.
     """
     name = name.strip()
     if not name or len(name) > MAX_NAME_LENGTH:
         return None
-    if not name.isprintable() or "[" in name or "]" in name:
-        return None
-    if name.lower().startswith(ANONYMOUS_PREFIX.lower()):
+    if not all(c.isalnum() or c in "_-" for c in name):
         return None
     return name
 

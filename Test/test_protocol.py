@@ -79,14 +79,16 @@ class TestNamePacket(unittest.TestCase):
         self.assertEqual(protocol.build_name(None), "NAME:")
         self.assertIsNone(protocol.parse_name("NAME:"))
 
-    def test_name_is_stripped_and_may_contain_spaces_and_colons(self):
-        self.assertEqual(protocol.parse_name("NAME:  Bob Smith  "), "Bob Smith")
-        self.assertEqual(protocol.parse_name("NAME:a:b"), "a:b")
+    def test_name_is_stripped_and_may_contain_letters_digits_underscore_dash(self):
+        self.assertEqual(protocol.parse_name("NAME:  Bob  "), "Bob")
+        self.assertEqual(protocol.parse_name("NAME:bob_smith-2"), "bob_smith-2")
         self.assertEqual(protocol.parse_name("NAME:Žofie"), "Žofie")
 
     def test_unusable_names_mean_anonymous(self):
-        for name in ["   ", "x" * (protocol.MAX_NAME_LENGTH + 1), "evil\nname", "tab\tname",
-                     "[Server]", "a]b", "Anonymous#1", "anonymous#7"]:
+        # the name also prefixes the client's key files, so no path characters
+        for name in ["   ", "x" * (protocol.MAX_NAME_LENGTH + 1), "evil\nname", "Bob Smith", "a:b",
+                     "[Server]", "a]b", "Anonymous#1", "anonymous#7",
+                     "../evil", "a/b", "a\\b", "dot.name"]:
             with self.subTest(name=name):
                 self.assertIsNone(protocol.normalize_name(name))
                 self.assertIsNone(protocol.parse_name(protocol.build_name(name)))

@@ -17,9 +17,9 @@ class TestEndToEnd(unittest.TestCase):
         self.scenario.close()
         self.tmp.cleanup()
 
-    def chat(self, secure, port=None, usernames=(None, None)):
-        a = self.scenario.client("a", port, secure, usernames[0])
-        b = self.scenario.client("b", port, secure, usernames[1])
+    def chat(self, secure, port=None, names=("a", "b")):
+        a = self.scenario.client(names[0], port, secure)
+        b = self.scenario.client(names[1], port, secure)
         keyed = [handshake(a, secure), handshake(b, secure)]
         a.send("hello-from-a")
         return a, b, keyed
@@ -33,14 +33,14 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_named_chat(self):
         self.scenario.server(secure=True)
-        a, b, keyed = self.chat(secure=True, usernames=("Alice", "Bob"))
+        a, b, keyed = self.chat(secure=True, names=("Alice", "Bob"))
         self.assertEqual(keyed, [True, True])
         a.wait_for("You are chatting as Alice.")
         b.wait_for("[Alice]: hello-from-a")
 
     def test_anonymous_chat_hides_port(self):
         self.scenario.server(secure=True)
-        a, b, keyed = self.chat(secure=True)
+        a, b, keyed = self.chat(secure=True, names=(None, None))
         self.assertEqual(keyed, [True, True])
         a.wait_for("You are chatting as Anonymous#1.")
         b.wait_for("You are chatting as Anonymous#2.")
@@ -58,7 +58,7 @@ class TestEndToEnd(unittest.TestCase):
         attacker = self.scenario.attacker(secure=False)
         attacker.send("attack")
         attacker.wait_for("MITM Attack Mode: ENABLED")
-        a, b, keyed = self.chat(secure=False, port=self.scenario.port + 1, usernames=("Alice", None))
+        a, b, keyed = self.chat(secure=False, port=self.scenario.port + 1, names=("Alice", None))
         self.assertEqual(keyed, [True, True])
         b.wait_for("[Alice]: hello-from-a")
         attacker.wait_for("[MITM] Extracted Username: Alice")
@@ -85,7 +85,7 @@ class TestEndToEnd(unittest.TestCase):
         attacker = self.scenario.attacker(secure=True)
         attacker.send("attack")
         attacker.wait_for("MITM Attack Mode: ENABLED")
-        a, b, keyed = self.chat(secure=True, port=self.scenario.port + 1, usernames=("Alice", "Bob"))
+        a, b, keyed = self.chat(secure=True, port=self.scenario.port + 1, names=("Alice", "Bob"))
         self.assertEqual(keyed, [False, False])
         server.wait_for("HACKER DETECTED")
         time.sleep(1.5)
