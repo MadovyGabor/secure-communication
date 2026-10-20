@@ -59,7 +59,21 @@ class TestRun(unittest.TestCase):
         args = main.parse_args(["client", "h", "1", "inst", "--unsecure"])
         with mock.patch("client.Client") as client:
             main.build_service(args)
-        client.assert_called_once_with("h", 1, "inst", secure=False)
+        client.assert_called_once_with("h", 1, "inst", secure=False, name=None)
+
+    def test_name_option(self):
+        args = main.parse_args(["client", "h", "1", "inst", "--name", "Bob Smith"])
+        self.assertEqual((args.instance, args.name), ("inst", "Bob Smith"))
+        self.assertIsNone(main.parse_args(["client", "h", "1"]).name)
+        with mock.patch("client.Client") as client:
+            main.build_service(args)
+        client.assert_called_once_with("h", 1, "inst", secure=True, name="Bob Smith")
+
+    def test_main_rejects_invalid_name(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(main.main(["client", "127.0.0.1", "8000", "--name", "[Server]"]), 1)
+        self.assertIn("invalid username", stderr.getvalue())
 
 
 if __name__ == "__main__":

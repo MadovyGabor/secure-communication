@@ -127,7 +127,7 @@ class Scenario:
 class LocalClient:
     """An in-process client.Client connected to a bare listening socket in a temp CWD."""
 
-    def __init__(self, secure=True):
+    def __init__(self, secure=True, name=None):
         import contextlib
         import io
         import tempfile
@@ -142,7 +142,7 @@ class LocalClient:
         self.output = io.StringIO()
         self.capture = lambda: contextlib.redirect_stdout(self.output)
         with self.capture():
-            self.client = client.Client(*self.listener.getsockname(), secure=secure)
+            self.client = client.Client(*self.listener.getsockname(), secure=secure, name=name)
         self.peer, _ = self.listener.accept()
 
     def feed(self, *packets):
@@ -160,14 +160,19 @@ class LocalClient:
 
 
 def handshake(client, secure=True):
-    """Run rsa (secure only) and dh on a client; return True if a session key was derived."""
+    """Run rsa (secure only) and dh on a client; return True once the server has named it.
+
+    Waiting for the server's "You are chatting as" notice means the NAME frame and its reply have
+    passed any proxy, so a test that arms the attacker afterwards only intercepts its own messages.
+    """
     if secure:
         client.send("rsa")
         client.wait_for("Exchanged RSA Public Keys")
     mark = len(client.output)
     client.send("dh")
     try:
-        client.wait_for("AES Session Key Derived", timeout=5, start=mark)
+        mark = client.wait_for("AES Session Key Derived", timeout=5, start=mark)
+        client.wait_for("You are chatting as", timeout=5, start=mark)
         return True
     except AssertionError:
         return False
