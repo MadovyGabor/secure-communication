@@ -36,7 +36,7 @@ class Attacker(NetworkService):
         
         print(f"\n[MITM] Attacker Proxy started on 127.0.0.1:{self.proxy_port}")
         print(f"[MITM] Relaying traffic to {host}:{port}")
-        print("[MITM] Napište 'help' pro seznam příkazů.\n")
+        print("[MITM] Type 'help' for a list of commands.\n")
 
     def loop(self):
         # Start proxy processing in a background thread
@@ -47,12 +47,12 @@ class Attacker(NetworkService):
             try:
                 cmd = input()
                 if cmd == "help":
-                    print("\n[MITM] Dostupné příkazy:")
-                    print("  attack        - Zapne/vypne aktivní MITM útok (podvržení DH klíčů).")
-                    print("  tamper <text> - Nahradí obsah další zachycené dešifrované zprávy zadaným textem.")
-                    print("  spoof         - Zapne/vypne generování falešných zpráv oběma stranám.")
-                    print("  exit          - Ukončí proxy server a odpojí klienty.")
-                    print("  help          - Zobrazí tuto nápovědu.\n")
+                    print("\n[MITM] Available commands:")
+                    print("  attack        - Toggle the active MITM attack (replace the DH public keys).")
+                    print("  tamper <text> - Replace the next intercepted and decrypted message with <text>.")
+                    print("  spoof         - Toggle sending fake messages to both sides.")
+                    print("  exit          - Stop the proxy and disconnect the clients.")
+                    print("  help          - Show this help.\n")
                 elif cmd == "attack":
                     self.mitm_active = not self.mitm_active
                     print(f"MITM Attack Mode: {'ENABLED' if self.mitm_active else 'DISABLED'}")

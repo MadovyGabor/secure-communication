@@ -43,17 +43,17 @@ class Client(NetworkService):
         self.network_thread.start()
 
     def loop(self):
-        print("\n[Client] Napište 'help' pro seznam příkazů.")
+        print("\n[Client] Type 'help' for a list of commands.")
         while self.network_thread.is_alive():
             input_ = input()
 
             if input_ == "help":
-                print("\n[Client] Dostupné příkazy:")
-                print("  rsa    - Započne výměnu RSA veřejných klíčů se serverem (autentizace).")
-                print("  dh     - Zahájí Diffie-Hellman výměnu klíčů pro šifrování (AES-GCM).")
-                print("  exit   - Ukončí připojení a vypne klienta.")
-                print("  help   - Zobrazí tuto nápovědu.")
-                print("  <text> - Jakýkoliv jiný text bude odeslán jako zpráva do chatu.\n")
+                print("\n[Client] Available commands:")
+                print("  rsa    - Exchange RSA public keys with the server (authentication).")
+                print("  dh     - Run the Diffie-Hellman key exchange for encryption (AES-GCM).")
+                print("  exit   - Close the connection and quit the client.")
+                print("  help   - Show this help.")
+                print("  <text> - Any other text is sent as a chat message.\n")
                 continue
 
             if input_ == "exit":
