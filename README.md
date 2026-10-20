@@ -152,25 +152,55 @@ Console output of the program is partly in Czech.
 
 ## Docker
 
-`Dockerfile` and `docker-compose.yml` run the demo in containers. Start everything with:
+`Dockerfile` and `docker-compose.yml` start the whole demo (server, MITM proxy and two clients) with
+one command:
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-The compose file defines three services, each taking the same arguments as `python main.py`:
+The compose file defines four services, each taking the same arguments as `python main.py`:
 
 | Service | Command | Notes |
 |---|---|---|
 | `server` | `server 0.0.0.0 8000` | Keys in the `server-keys` volume. A healthcheck waits until port 8000 is listening. |
-| `attacker` | `attack server 8000` | The MITM proxy. It listens on `127.0.0.1:8001` inside its own network namespace. |
-| `client` | `client server 8000 docker` | Shares the attacker's network namespace, so it reaches the server as `server:8000` and the proxy as `127.0.0.1:8001`. Keys in the `client-keys` volume. |
+| `attacker` | `attack server 8000` | The MITM proxy. It listens on `127.0.0.1:8001` inside its own network namespace. A healthcheck waits until it listens, so the clients never connect too early. |
+| `client-alice` | `client 127.0.0.1 8001 Alice` | Shares the attacker's network namespace and chats through the proxy as `Alice`. Keys in the `alice-keys` volume. |
+| `client-bob` | `client 127.0.0.1 8001 Bob` | The same as `Alice`, as `Bob`, with keys in the `bob-keys` volume. |
 
-`server` and `attacker` are on an internal network named `chat`. The client and the proxy read
-commands from the terminal; attach to them with `docker attach secure-chat-client-1` or
-`docker attach secure-chat-attacker-1` (detach with Ctrl+P, Ctrl+Q). For a client that goes through
-the proxy, run `docker compose run --rm client client 127.0.0.1 8001 victim`. For unsecure mode,
-append `--unsecure` to the commands in `docker-compose.yml`.
+`server` and `attacker` are on an internal network named `chat`, with no ports published to the host.
+Because both clients go through the proxy, the server log shows the proxy's IP for both of them.
+
+Watch the server audit log:
+
+```bash
+docker compose logs -f server
+```
+
+Chat: attach to each client in its own terminal, then type `rsa`, `dh` and a message. Detach with
+Ctrl+P, Ctrl+Q; Ctrl+C quits the client. The client prints its prompt when it starts, before you
+attach, so type `help` to see the commands.
+
+```bash
+docker attach secure-chat-client-alice-1
+```
+
+```bash
+docker attach secure-chat-client-bob-1
+```
+
+To show the MITM attack, attach to the proxy and type `attack`, then run `dh` again in a client:
+in secure mode the server logs `HACKER DETECTED` and drops the key exchange.
+
+```bash
+docker attach secure-chat-attacker-1
+```
+
+A third client can join through the proxy with
+`docker compose run --rm client-alice client 127.0.0.1 8001 Carol` (leave the name out to be
+`Anonymous#N`, or use `server 8000` to bypass the proxy). For unsecure mode, append `--unsecure` to
+the commands in `docker-compose.yml`. Stop everything with `docker compose down`; add `-v` to delete
+the key volumes too.
 
 The image runs as a non-root user, and `.dockerignore` keeps key files out of the build context.
 
