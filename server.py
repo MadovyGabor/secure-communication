@@ -3,14 +3,32 @@
 Clients are shown in the chat by username ("[Alice]: hi"), never by their TCP port. The username
 arrives in the first encrypted frame after the key exchange; a client without a usable name gets
 a sequential "Anonymous#N".
+
+Server events go through the `logging` module as "[YYYY-MM-DD HH:MM:SS] LEVEL - message".
+main.py calls configure_logging() in server mode only, so importing this module (the client, the
+attacker and the tests all do) leaves logging untouched.
 """
+import logging
 import socket
+import sys
 
 import networkstack
 import protocol
 from diffieHellman import DHNetwork
 from networkservice import NetworkService
 from RSA import RSA_Main
+
+LOG_FORMAT = "[%(asctime)s] %(levelname)s - %(message)s"
+LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+log = logging.getLogger(__name__)
+
+
+def configure_logging(stream=None, level=logging.INFO):
+    """Send log records of this process to `stream` (default stdout) in the audit log format."""
+    logging.basicConfig(level=level, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT,
+                        stream=stream or sys.stdout, force=True)
+
 
 class Server(NetworkService):
     """Chat server: keeps RSA and AES keys per client and forwards each message to the other clients."""
@@ -22,7 +40,12 @@ class Server(NetworkService):
         self.socket.bind((host, port))
         self.socket.listen(1)
         
-        self.server_socket = networkstack.ServerSocket(self.socket, on_disconnect=self.forget_client)
+        self.server_socket = networkstack.ServerSocket(self.socket, on_disconnect=self.forget_client,
+                                                       on_connect=self.register_connection)
+
+        # audit log identity: port -> ("conn#N", client IP)
+        self.connections = {}
+        self.connection_count = 0
 
         #DH handling: port -> keys
         self.client_aes_keys = {}
@@ -37,9 +60,22 @@ class Server(NetworkService):
         self.anonymous_count = 0
         self.my_rsa_pub, self.my_rsa_priv = RSA_Main.load_or_create_keys("server_key.json")
 
-        print(f"[Server] Started listening on port {port}")
+        log.info("Started listening on port %d (%s mode)", port, "secure" if secure else "unsecure")
+
+    def register_connection(self, port, address):
+        self.connection_count += 1
+        self.connections[port] = (f"conn#{self.connection_count}", address[0])
+        log.info("Client connected: %s", self.who(port))
+
+    def who(self, port):
+        """Audit log label of a client: "Alice (conn#3, 10.0.0.5)" or "conn#3 (10.0.0.5)" before it has a name."""
+        conn_id, ip = self.connections.get(port, ("conn#?", "unknown IP"))
+        name = self.client_names.get(port)
+        return f"{name} ({conn_id}, {ip})" if name else f"{conn_id} ({ip})"
 
     def forget_client(self, port):
+        log.info("Client disconnected: %s", self.who(port))
+        self.connections.pop(port, None)
         # a later client reusing the port must not inherit keys of the previous one
         self.client_aes_keys.pop(port, None)
         self.client_raw_dh_secrets.pop(port, None)
@@ -55,7 +91,7 @@ class Server(NetworkService):
         try:
             self.handle_packet(sender, data)
         except Exception as e:
-            print(f"[Server] Error: dropping malformed packet from client {sender.port}: {e}")
+            log.error("%s: dropping malformed packet: %s", self.who(sender.port), e)
 
     def handle_packet(self, sender, data: bytes):
         message = protocol.decode_text(data)
@@ -67,18 +103,19 @@ class Server(NetworkService):
 
             packet = RSA_Main.build_rsa_init_packet(self.my_rsa_pub)
             sender.send(packet.encode("utf-8"))
+            log.info("RSA public key exchange completed with %s", self.who(sender.port))
             return
 
         # 2. authenticated Client Messages
         if message is not None and message.startswith(protocol.RSA_AUTH):
             client_pub = self.client_rsa_keys.get(sender.port)
             if not client_pub:
-                print("[Server] Error: Client has not exchanged RSA keys yet.")
+                log.warning("%s: signed packet before the RSA key exchange, dropped", self.who(sender.port))
                 return
 
             is_valid, inner_message = RSA_Main.process_rsa_auth_packet(message, client_pub)
             if not is_valid:
-                print("[Security] HACKER DETECTED! Signature invalid. Dropping packet.")
+                log.warning("HACKER DETECTED! %s: invalid signature, packet dropped", self.who(sender.port))
                 return
 
             # If authentic
@@ -86,13 +123,14 @@ class Server(NetworkService):
                 self.respond_to_dh_init(sender, inner_message, sign=True)
                 return
 
-            print("[Server] Error: unsupported authenticated message.")
+            log.warning("%s: unsupported authenticated message, dropped", self.who(sender.port))
             return
 
         # 2.5 Unauthenticated Client Messages
         if message is not None and message.startswith(protocol.DH_INIT):
             if self.secure:
-                print("[Security] HACKER DETECTED! Dropping unauthenticated packet.")
+                log.warning("HACKER DETECTED! %s: unauthenticated DH_INIT in secure mode, packet dropped",
+                            self.who(sender.port))
                 return
 
             self.respond_to_dh_init(sender, message, sign=False)
@@ -107,7 +145,7 @@ class Server(NetworkService):
         try:
             plaintext = self.decrypt_and_decode(data, self.client_aes_keys[sender.port])
         except Exception as e:
-            print(f"[Security] Decryption failed: {e}")
+            log.warning("%s: decryption failed, frame dropped: %s", self.who(sender.port), e)
             return
 
         # the first frame after a key exchange names the client
@@ -120,15 +158,19 @@ class Server(NetworkService):
             self.assign_name(sender, None)  # client sent chat without introducing itself
 
         name = self.client_names[sender.port]
-        print(f"[Message from {name}]: {plaintext}")
         out = f"[{name}]: {plaintext}".encode("utf-8")
 
+        recipients = 0
         for client_port in self.server_socket.clients:
             if (client_port != sender.port and client_port in self.client_aes_keys):
                 client_socket = self.server_socket.clients[client_port]
                 client_aes_key = self.client_aes_keys[client_port]
-        
+
                 self.send_encrypted_to_client(client_socket, out, client_aes_key)
+                recipients += 1
+
+        # routing only: the audit log never contains message content
+        log.info("%s -> broadcasted to %d client%s", name, recipients, "" if recipients == 1 else "s")
     
     def assign_name(self, sender, requested):
         """Store the client's username (or a fresh Anonymous#N) and tell the client which one it got."""
@@ -142,8 +184,8 @@ class Server(NetworkService):
             if requested is None:
                 self.anonymous_count += 1
                 requested = f"{protocol.ANONYMOUS_PREFIX}{self.anonymous_count}"
+            log.info("%s joined the chat as %s", self.who(sender.port), requested)
             name = self.client_names[sender.port] = requested
-            print(f"[Server] Client joined the chat as {name}")
 
         # a client that re-keys keeps the name it already has
         text = f"[Server]: {notice + ' ' if notice else ''}You are chatting as {name}."
@@ -159,8 +201,9 @@ class Server(NetworkService):
             dh_reply_packet = RSA_Main.build_rsa_auth_packet(dh_reply_packet, self.my_rsa_priv)
         sender.send(dh_reply_packet.encode("utf-8"))
 
-        print(f"[DH Protocol] Raw DH Secret: {str(raw_dh_secret)[:15]}...")
-        print(f"[DH Protocol] AES Session Key Derived: {aes_session_key.hex()[:15]}...")
+        # never log key material, not even a prefix of it
+        log.info("AES session key established with %s (%s Diffie-Hellman)",
+                 self.who(sender.port), "RSA-signed" if sign else "unauthenticated")
 
     # helper function for encrypting data and sending it to a client
     def send_encrypted_to_client(self, client_socket, data: bytes, secret: bytes, handler = None, handler_args = ()):

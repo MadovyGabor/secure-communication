@@ -186,15 +186,34 @@ Keys are stored as JSON in the **current working directory**:
 
 Private keys are stored unencrypted. The `.gitignore` excludes `*.json`, so never commit them.
 
+## Server audit log
+
+The server logs its events through Python's `logging` module to stdout (so `docker compose logs server`
+shows them too), in the format `[YYYY-MM-DD HH:MM:SS] LEVEL - message`:
+
+```
+[2026-10-20 14:16:24] INFO - Client connected: conn#1 (127.0.0.1)
+[2026-10-20 14:16:26] INFO - RSA public key exchange completed with conn#1 (127.0.0.1)
+[2026-10-20 14:16:26] INFO - AES session key established with conn#1 (127.0.0.1) (RSA-signed Diffie-Hellman)
+[2026-10-20 14:16:26] INFO - conn#1 (127.0.0.1) joined the chat as Alice
+[2026-10-20 14:16:27] INFO - Alice -> broadcasted to 1 client
+[2026-10-20 14:16:27] INFO - Client disconnected: Alice (conn#1, 127.0.0.1)
+```
+
+Each connection is labelled `conn#N` with the client's IP, plus the username once the client has
+one; TCP ports are not logged. Security events (`HACKER DETECTED`, failed decryption) are `WARNING`,
+malformed packets are `ERROR`. The log never contains chat text or key material. Logging is set up
+by `server.configure_logging()`, which `main.py` calls in server mode only.
+
 ## Tests
 
 ```bash
 python -m unittest discover -s Test -t .
 ```
 
-The suite has 94 tests: unit tests for framing, packet formats, AES-GCM (including known-answer
-vectors), RSA keys, Diffie-Hellman, the CLI, error handling, the secure-mode rules and usernames
-(`test_naming.py`), plus end-to-end tests that start the server, proxy and clients as subprocesses and
+The suite has 103 tests: unit tests for framing, packet formats, AES-GCM (including known-answer
+vectors), RSA keys, Diffie-Hellman, the CLI, error handling, the secure-mode rules, usernames
+(`test_naming.py`) and the server audit log (`test_audit_log.py`), plus end-to-end tests that start the server, proxy and clients as subprocesses and
 run the demo scenarios on localhost. A full run takes about a minute.
 
 ## CI

@@ -30,6 +30,7 @@ def build_service(args: argparse.Namespace):
     if args.mode == "client":
         return client.Client(args.host, args.port, args.name, secure=args.secure)
     if args.mode == "server":
+        server.configure_logging()
         return server.Server(args.host, args.port, secure=args.secure)
     return attacker.Attacker(args.host, args.port, secure=args.secure)
 
