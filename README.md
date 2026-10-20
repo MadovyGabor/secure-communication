@@ -85,9 +85,9 @@ requirements.txt      Python dependencies
 
 ## Post-Project Refactoring & Bug Fixes (by Gabriel Madový)
 
-After our team finished the university course, I (Gabriel Madový) took the codebase to clean it up and
-turn it into a reliable project. With the help of AI tools, I reviewed the entire repository,
-refactored its structure, and fixed more than 20 bugs across the networking and cryptography layers.
+After our team finished the university course, I took the codebase to clean it up and turn it into a
+reliable project. With the help of AI tools, I reviewed the entire repository, refactored its
+structure, and fixed 21 bugs across the networking and cryptography layers.
 I built a suite of more than 100 unit and end-to-end tests that run all four demo scenarios
 automatically, added a GitHub Actions CI pipeline, and created the Docker and Docker Compose setup so
 anyone can run the server, the MITM proxy and two clients in isolated containers. Later I added
