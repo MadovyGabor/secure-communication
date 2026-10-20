@@ -5,7 +5,6 @@
 [![Docker Compose](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](#docker--demo-scenarios)
 [![Tests](https://img.shields.io/badge/tests-103-success?logo=pytest&logoColor=white)](#tests--ci)
 [![Crypto](https://img.shields.io/badge/crypto-RSA%20%7C%20Diffie--Hellman%20%7C%20AES--GCM-blueviolet)](#how-it-works)
-[![Last commit](https://img.shields.io/github/last-commit/MadovyGabor/secure-comunication)](https://github.com/MadovyGabor/secure-comunication/commits/main)
 
 ## About the Project
 
