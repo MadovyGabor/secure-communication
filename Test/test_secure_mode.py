@@ -6,18 +6,20 @@ import sympy
 
 from diffieHellman import DHLogic, DHNetwork
 from RSA import RSA_Main, RSA_Math
+import client
 from Test.harness import LocalClient
 
 
 class ClientCase(unittest.TestCase):
     secure = True
+    name = None
 
     @classmethod
     def setUpClass(cls):
         cls.server_pub, cls.server_priv = RSA_Math.generate_rsa_parameters(1024)
 
     def setUp(self):
-        self.local = LocalClient(secure=self.secure)
+        self.local = LocalClient(secure=self.secure, name=self.name)
         self.client = self.local.client
         self.client.peer_rsa_pub = self.server_pub
         _, self.client.p, self.client.g, self.client.private_key = DHNetwork.build_init_packet()
@@ -37,6 +39,22 @@ class ClientCase(unittest.TestCase):
             return self.local.peer.recv(65536)
         except socket.timeout:
             return b""
+
+    def sent_frame(self, timeout=1.0):
+        """Payload of the next length-prefixed frame the client wrote to the fake server."""
+        def exact(count):
+            data = b""
+            while len(data) < count:
+                chunk = self.local.peer.recv(count - len(data))
+                if not chunk:
+                    raise AssertionError("connection closed")
+                data += chunk
+            return data
+        self.local.peer.settimeout(timeout)
+        return exact(int.from_bytes(exact(4), "big"))
+
+    def signed_dh_accept(self):
+        return RSA_Main.build_rsa_auth_packet(self.dh_accept(), self.server_priv).encode()
 
 
 class TestSecureClient(ClientCase):
@@ -64,12 +82,40 @@ class TestSecureClient(ClientCase):
         self.assertIn("No session key yet", self.local.output.getvalue())
 
     def test_chat_with_session_key_is_encrypted(self):
-        self.local.feed(RSA_Main.build_rsa_auth_packet(self.dh_accept(), self.server_priv).encode())
+        self.local.feed(self.signed_dh_accept())
+        self.sent_frame()  # NAME packet
         with self.local.capture():
             self.client.send_chat("secret")
-        frame = self.sent()
+        frame = self.sent_frame()
         self.assertNotIn(b"secret", frame)
-        self.assertEqual(self.client.decrypt_payload(frame[4:], self.client.aes_session_key), b"secret")
+        self.assertEqual(self.client.decrypt_payload(frame, self.client.aes_session_key), b"secret")
+
+    def test_anonymous_client_uses_default_key_files(self):
+        self.assertEqual(self.client.instance, "default")
+
+    def test_anonymous_client_sends_empty_name_after_key_exchange(self):
+        self.local.feed(self.signed_dh_accept())
+        frame = self.sent_frame()
+        self.assertEqual(self.client.decrypt_payload(frame, self.client.aes_session_key), b"NAME:")
+
+
+class TestClientName(ClientCase):
+    name = "  Alice  "
+
+    def test_name_is_sent_encrypted_after_key_exchange(self):
+        self.assertEqual(self.sent(timeout=0.3), b"")  # nothing before the key exchange
+        self.local.feed(self.signed_dh_accept())
+        frame = self.sent_frame()
+        self.assertNotIn(b"Alice", frame)
+        self.assertEqual(self.client.decrypt_payload(frame, self.client.aes_session_key), b"NAME:Alice")
+
+    def test_invalid_name_is_rejected_before_connecting(self):
+        for name in ["", "[Server]", "Anonymous#1", "x" * 33, "../evil", "Bob Smith"]:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                client.Client("127.0.0.1", 1, name)
+
+    def test_key_files_are_named_after_user(self):
+        self.assertEqual(self.client.instance, "Alice")
 
 
 class TestUnsecureClient(ClientCase):

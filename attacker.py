@@ -206,7 +206,12 @@ class Attacker(NetworkService):
             except ValueError as e:
                 print(f"[MITM] Could not decrypt intercepted frame, relaying it unchanged: {e}")
                 return data
-            print(f"[MITM] Extracted Plaintext: {plaintext.decode('utf-8', errors='replace')}")
+            text = plaintext.decode('utf-8', errors='replace')
+            if text.startswith(protocol.NAME) and "CLIENT -> SERVER" in direction:
+                # the username frame is not a chat message: report it and keep the tamper for the next one
+                print(f"[MITM] Extracted Username: {protocol.parse_name(text) or '(anonymous)'}")
+                return self.encrypt_payload(plaintext, key_out)
+            print(f"[MITM] Extracted Plaintext: {text}")
 
             if self.tamper_text:
                 print(f"[MITM] TAMPERING MESSAGE! Replacing with '{self.tamper_text}'")
