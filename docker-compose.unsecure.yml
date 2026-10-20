@@ -1,0 +1,19 @@
+# Unsecure demo mode: no RSA authentication, so the MITM proxy can take over the session.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.unsecure.yml up -d
+#
+# Only the commands change; networks, volumes, healthchecks and TTY settings come from
+# docker-compose.yml. Compose replaces a command as a whole, so each one is repeated in full.
+
+services:
+  server:
+    command: ["server", "0.0.0.0", "8000", "--unsecure"]
+
+  attacker:
+    command: ["attack", "server", "8000", "--unsecure"]
+
+  client-alice:
+    command: ["client", "127.0.0.1", "8001", "Alice", "--unsecure"]
+
+  client-bob:
+    command: ["client", "127.0.0.1", "8001", "Bob", "--unsecure"]
