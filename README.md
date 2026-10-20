@@ -19,7 +19,7 @@ python main.py server 127.0.0.1 8000
 ```
 
 ```bash
-python main.py client 127.0.0.1 8000 alice
+python main.py client 127.0.0.1 8000 alice --name Alice
 ```
 
 ```bash
@@ -50,6 +50,15 @@ text until a session key exists.
 In **unsecure mode** (`--unsecure`) there is no RSA step, the Diffie-Hellman exchange is not
 authenticated, and the MITM proxy can take over the session. That is the point of the demo.
 
+**Usernames.** The chat shows who wrote a message as `[Alice]: Hello!`. A client's TCP port is never
+shown. Right after the key exchange the client sends its `--name` as the first encrypted
+frame (`NAME:<name>`), so the name never appears in the plaintext handshake. A client without a name,
+or with one the server can't use, is shown as `Anonymous#1`, `Anonymous#2`, and so on.
+Names that can't be used: empty, longer than 32 characters, containing control characters or `[`/`]`,
+starting with `Anonymous#`, or already taken by a connected client (case-insensitive). The server
+tells each client which name it got (`[Server]: You are chatting as Alice.`), and a client keeps its
+name when it re-keys with `dh`.
+
 Packet formats (`protocol.py`):
 
 ```
@@ -58,6 +67,7 @@ RSA_AUTH:<message>|<signature>   message signed with the sender's RSA key
 DH_INIT:<p>:<g>:<A>              Diffie-Hellman offer
 DH_ACCEPT:<B>                    Diffie-Hellman answer
 <length:4><nonce:12><tag:16><ciphertext>   encrypted chat message
+NAME:<username>                  first encrypted message after each DH exchange (empty = anonymous)
 ```
 
 ## Requirements
@@ -91,11 +101,12 @@ MITM proxy (relays to the server and listens on `127.0.0.1` at the server port +
 python main.py attack 127.0.0.1 8000
 ```
 
-Client connecting directly to the server, or through the proxy. The last argument is an instance
-name (default `default`) that selects the client's key files:
+Client connecting directly to the server, or through the proxy. The last positional argument is
+an instance name (default `default`) that selects the client's key files. `--name` sets the username
+shown in the chat; without it the server assigns `Anonymous#N`:
 
 ```bash
-python main.py client 127.0.0.1 8000 alice
+python main.py client 127.0.0.1 8000 alice --name Alice
 ```
 
 ```bash
@@ -131,9 +142,9 @@ Stop the server with Ctrl+C. Ctrl+C also stops a client or the proxy.
 
 | Scenario | Steps | Expected outcome |
 |---|---|---|
-| Secure chat | server; two clients on port 8000; each runs `rsa`, then `dh`; one sends a message | The other client prints `[Message from Server]: <port>: <message>` |
+| Secure chat | server; two clients on port 8000; each runs `rsa`, then `dh`; one sends a message | The sender gets `[Server]: You are chatting as <name>.` after `dh`; the other client prints `[Message from Server]: [<name>]: <message>` |
 | Unsecure chat | as above with `--unsecure` everywhere and without `rsa` | The message is delivered |
-| MITM, unsecure | server and proxy with `--unsecure`; proxy `attack`; two clients on port 8001 with `--unsecure` run `dh` and chat | The message is delivered, and the proxy prints `[MITM] Extracted Plaintext: <message>` |
+| MITM, unsecure | server and proxy with `--unsecure`; proxy `attack`; two clients on port 8001 with `--unsecure` run `dh` and chat | The message is delivered, and the proxy prints `[MITM] Extracted Username: <name>` and `[MITM] Extracted Plaintext: <message>` |
 | MITM, secure | server and proxy in secure mode; proxy `attack`; two clients on port 8001 run `rsa`, then `dh` | The server prints `[Security] HACKER DETECTED! Signature invalid. Dropping packet.`, no session key is derived, and no chat message gets through |
 
 Console output of the program is partly in Czech.
@@ -157,8 +168,9 @@ The compose file defines three services, each taking the same arguments as `pyth
 `server` and `attacker` are on an internal network named `chat`. The client and the proxy read
 commands from the terminal; attach to them with `docker attach secure-chat-client-1` or
 `docker attach secure-chat-attacker-1` (detach with Ctrl+P, Ctrl+Q). For a client that goes through
-the proxy, run `docker compose run --rm client client 127.0.0.1 8001 victim`. For unsecure mode, append
-`--unsecure` to the commands in `docker-compose.yml`.
+the proxy, run `docker compose run --rm client client 127.0.0.1 8001 victim --name Victim`. For
+unsecure mode, append `--unsecure` to the commands in `docker-compose.yml`; append `--name <username>`
+to a client command to choose its username.
 
 The image runs as a non-root user, and `.dockerignore` keeps key files out of the build context.
 
@@ -180,10 +192,10 @@ Private keys are stored unencrypted. The `.gitignore` excludes `*.json`, so neve
 python -m unittest discover -s Test -t .
 ```
 
-The suite has 70 tests: unit tests for framing, packet formats, AES-GCM (including known-answer
-vectors), RSA keys, Diffie-Hellman, the CLI, error handling and the secure-mode rules, plus end-to-end
-tests that start the server, proxy and clients as subprocesses and run the four demo scenarios on
-localhost. A full run takes about 30 seconds.
+The suite has 92 tests: unit tests for framing, packet formats, AES-GCM (including known-answer
+vectors), RSA keys, Diffie-Hellman, the CLI, error handling, the secure-mode rules and usernames
+(`test_naming.py`), plus end-to-end tests that start the server, proxy and clients as subprocesses and
+run the demo scenarios on localhost. A full run takes about a minute.
 
 ## CI
 
@@ -248,6 +260,8 @@ file as it was just before the fix commit. Test names are classes and methods in
   real use.
 - The MITM proxy always listens on `127.0.0.1`.
 - Key files depend on the working directory: starting from another directory creates a new identity.
+- Usernames are not tied to a client's RSA key or kept between sessions: any client can take a name
+  that is free at the moment.
 
 ## Team Roles and My Post-Project Refactoring
 
