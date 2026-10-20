@@ -79,7 +79,9 @@ GCM/                  AES-GCM implementation
 Test/                 unit and end-to-end tests
 Dockerfile            container image for all three roles
 docker-compose.yml    server, attacker and two client services
+docker-compose.unsecure.yml   override that runs the demo in unsecure mode
 .github/workflows/ci.yml   GitHub Actions workflow that runs the tests
+.github/workflows/docker-publish.yml   publishes the image to GHCR on every release
 requirements.txt      Python dependencies
 ```
 
@@ -180,8 +182,7 @@ on the command line). Run `python main.py -h` for the full usage.
 | `help` | List the commands |
 | `exit` | Stop the proxy |
 
-Stop the server with Ctrl+C. Ctrl+C also stops a client or the proxy. Console output of the program
-is partly in Czech.
+Stop the server with Ctrl+C. Ctrl+C also stops a client or the proxy.
 
 ### Key files
 
@@ -198,11 +199,20 @@ Private keys are stored unencrypted. The `.gitignore` excludes `*.json`, so neve
 ## Docker & Demo Scenarios
 
 `Dockerfile` and `docker-compose.yml` start the whole demo (server, MITM proxy and two clients) with
-one command:
+one command. Secure mode (the default):
 
 ```bash
 docker compose up -d --build
 ```
+
+Unsecure demo mode, where the MITM proxy can take over the session. The override file
+`docker-compose.unsecure.yml` only adds `--unsecure` to the four commands:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.unsecure.yml up -d --build
+```
+
+Stop the demo before switching modes, so every container restarts with the new commands.
 
 The compose file defines four services, each taking the same arguments as `python main.py`:
 
@@ -243,11 +253,38 @@ docker attach secure-chat-attacker-1
 
 A third client can join through the proxy with
 `docker compose run --rm client-alice client 127.0.0.1 8001 Carol` (leave the name out to be
-`Anonymous#N`, or use `server 8000` to bypass the proxy). For unsecure mode, append `--unsecure` to
-the commands in `docker-compose.yml`. Stop everything with `docker compose down`; add `-v` to delete
-the key volumes too.
+`Anonymous#N`, or use `server 8000` to bypass the proxy). Stop everything with `docker compose down`;
+add `-v` to delete the key volumes too.
 
 The image runs as a non-root user, and `.dockerignore` keeps key files out of the build context.
+
+### Pre-built image (GHCR)
+
+Every published GitHub release builds the image for `linux/amd64` and `linux/arm64` and pushes it to
+the GitHub Container Registry, tagged with the release version (for example `1.1.0` and `1.1`) and
+`latest` ([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)):
+
+```bash
+docker pull ghcr.io/madovygabor/secure-comunication:latest
+```
+
+To run the Compose demo on the pre-built image instead of building it, tag it with the name the
+compose file uses and start without `--build`:
+
+```bash
+docker tag ghcr.io/madovygabor/secure-comunication:latest secure-chat:latest
+```
+
+```bash
+docker compose up -d
+```
+
+The image takes the same arguments as `python main.py`, so it also runs a single role. For example a
+server reachable from local clients on port 8000:
+
+```bash
+docker run --rm -it -p 8000:8000 ghcr.io/madovygabor/secure-comunication:latest server 0.0.0.0 8000
+```
 
 ### The four demo scenarios
 
@@ -289,7 +326,9 @@ run the demo scenarios on localhost. A full run takes about a minute.
 
 The GitHub Actions workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push
 to `main` and on every pull request to `main`. It installs `requirements.txt` on `ubuntu-latest` with
-Python 3.13 and runs the same command.
+Python 3.13 and runs the same command. A second workflow,
+[`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml), runs when a GitHub
+release is published and pushes the Docker image to GHCR.
 
 ## Known Limitations
 

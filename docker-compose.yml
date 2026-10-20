@@ -12,7 +12,7 @@
 # Control the proxy:  docker attach secure-chat-attacker-1
 # Another client:     docker compose run --rm client-alice client 127.0.0.1 8001 Carol
 #                     (leave the name out to be Anonymous#N; use "server 8000" to bypass the proxy)
-# Unsecure mode:      append "--unsecure" to the server, attacker and client commands
+# Unsecure mode:      docker compose -f docker-compose.yml -f docker-compose.unsecure.yml up -d
 
 name: secure-chat
 
